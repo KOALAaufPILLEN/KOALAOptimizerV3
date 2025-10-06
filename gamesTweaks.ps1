@@ -11,23 +11,23 @@ function Get-RunningGameProcesses {
     Monitors system processes to detect active games and automatically trigger optimizations
     #>
 
+    try {
         $runningGames = @()
         $gameProcesses = Get-Process | Where-Object {
-            $_.ProcessName -and $_.MainWindowTitle -and
-            ($_.ProcessName -match "^(cs2|csgo|valorant|overwatch|rainbow|fortnite|apex|pubg|warzone|modernwarfare|league|rocket|dota2|gta|cyberpunk|minecraft)" -or
-             $_.MainWindowTitle -match "Counter-Strike|VALORANT|Overwatch|Rainbow Six|Fortnite|Apex Legends|PUBG|Warzone|Modern Warfare|League of Legends|Rocket League|Dota 2|Grand Theft Auto|Cyberpunk|Minecraft")
-
+            $_.ProcessName -and $_.MainWindowTitle -and (
+                $_.ProcessName -match "^(cs2|csgo|valorant|overwatch|rainbow|fortnite|apex|pubg|warzone|modernwarfare|league|rocket|dota2|gta|cyberpunk|minecraft)" -or
+                $_.MainWindowTitle -match "Counter-Strike|VALORANT|Overwatch|Rainbow Six|Fortnite|Apex Legends|PUBG|Warzone|Modern Warfare|League of Legends|Rocket League|Dota 2|Grand Theft Auto|Cyberpunk|Minecraft"
+            )
         }
 
         foreach ($process in $gameProcesses) {
-            # Match against our game profiles
             $matchedProfile = $null
             foreach ($profileKey in $GameProfiles.Keys) {
                 $profile = $GameProfiles[$profileKey]
                 if ($profile.ProcessNames -and ($profile.ProcessNames -contains $process.ProcessName -or
-                    $profile.ProcessNames | Where-Object { $process.ProcessName -match $_ })) {
+                    ($profile.ProcessNames | Where-Object { $process.ProcessName -match $_ }))) {
                     $matchedProfile = @{
-                        Key = $profileKey
+                        Key     = $profileKey
                         Profile = $profile
                         Process = $process
                     }
@@ -39,13 +39,9 @@ function Get-RunningGameProcesses {
                 $runningGames += $matchedProfile
                 Log "Detected running game: $($matchedProfile.Profile.DisplayName) (PID: $($process.Id))" 'Info'
             } else {
-                # Detected a game-like process but no profile match
                 $runningGames += @{
-                    Key = "unknown"
-                    Profile = @{
-                        DisplayName = $process.MainWindowTitle
-                        ProcessNames = @($process.ProcessName)
-                    }
+                    Key     = 'unknown'
+                    Profile = @{ DisplayName = $process.MainWindowTitle; ProcessNames = @($process.ProcessName) }
                     Process = $process
                 }
                 Log "Detected unknown game: $($process.MainWindowTitle) ($($process.ProcessName))" 'Info'
@@ -53,9 +49,11 @@ function Get-RunningGameProcesses {
         }
 
         return $runningGames
-
+    } catch {
         Log "Error detecting running games: $($_.Exception.Message)" 'Warning'
         return @()
+    }
+}
 
 function Update-ActiveGamesTracking {
     <#
@@ -65,56 +63,50 @@ function Update-ActiveGamesTracking {
     Maintains real-time tracking of active games and applies optimizations automatically
     #>
 
+    try {
         $currentGames = Get-RunningGameProcesses
         $previousGames = $global:ActiveGameProcesses
 
-        # Check for newly started games
         $newGames = $currentGames | Where-Object {
             $game = $_
             -not ($previousGames | Where-Object { $_.Process.Id -eq $game.Process.Id })
-
         }
 
-        # Check for games that have stopped
         $stoppedGames = $previousGames | Where-Object {
             $game = $_
             -not ($currentGames | Where-Object { $_.Process.Id -eq $game.Process.Id })
         }
 
-        # Update global tracking
         $global:ActiveGameProcesses = $currentGames
         $global:ActiveGames = $currentGames | ForEach-Object { $_.Profile.DisplayName }
 
-        # Handle newly started games
         foreach ($newGame in $newGames) {
             Log "Game started: $($newGame.Profile.DisplayName)" 'Success'
-
-            # Auto-optimization trigger
-            if ($global:AutoOptimizeEnabled -and $newGame.Key -ne "unknown") {
+            if ($global:AutoOptimizeEnabled -and $newGame.Key -ne 'unknown') {
                 Log "Auto-optimization triggered for: $($newGame.Profile.DisplayName)" 'Info'
                 Start-AutoGameOptimization -GameProfile $newGame
             }
         }
 
-        # Handle stopped games
         foreach ($stoppedGame in $stoppedGames) {
             Log "Game stopped: $($stoppedGame.Profile.DisplayName)" 'Info'
         }
 
-        # Update dashboard count
         if ($lblDashActiveGames) {
             $lblDashActiveGames.Dispatcher.Invoke([Action]{
                 if ($currentGames.Count -gt 0) {
                     $lblDashActiveGames.Text = "$($currentGames.Count) active"
                     Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#8F6FFF'
                 } else {
-                    $lblDashActiveGames.Text = "None active"
+                    $lblDashActiveGames.Text = 'None active'
                     Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#A6AACF'
                 }
             })
         }
-
+    } catch {
         Log "Error updating active games tracking: $($_.Exception.Message)" 'Warning'
+    }
+}
 
 function Start-AutoGameOptimization {
     <#
@@ -124,55 +116,56 @@ function Start-AutoGameOptimization {
     The detected game profile to optimize for
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $GameProfile
     )
 
+    try {
         $profile = $GameProfile.Profile
         Log "Starting auto-optimization for: $($profile.DisplayName)" 'Info'
 
-        # Apply game-specific tweaks if available
-        if ($GameProfile.Key -ne "unknown" -and $profile.SpecificTweaks) {
+        if ($GameProfile.Key -ne 'unknown' -and $profile.SpecificTweaks) {
             foreach ($tweak in $profile.SpecificTweaks) {
                 switch ($tweak) {
                     'DisableNagle' {
                         Set-Reg "HKLM:\SYSTEM\CurrentControlSet\services\Tcpip\Parameters\Interfaces" "TcpNoDelay" 'DWord' 1 -RequiresAdmin $true | Out-Null
-                        Log "Nagle algorithm disabled for gaming" 'Success'
-
+                        Log 'Nagle algorithm disabled for gaming' 'Success'
                     }
                     'HighPrecisionTimer' {
                         Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" "GlobalTimerResolutionRequests" 'DWord' 1 -RequiresAdmin $true | Out-Null
-                        Log "High precision timer enabled" 'Success'
+                        Log 'High precision timer enabled' 'Success'
                     }
                     'NetworkOptimization' {
                         Set-Reg "HKLM:\SYSTEM\CurrentControlSet\services\Tcpip\Parameters" "TcpDelAckTicks" 'DWord' 0 -RequiresAdmin $true | Out-Null
                         Set-Reg "HKLM:\SYSTEM\CurrentControlSet\services\Tcpip\Parameters" "TCPNoDelay" 'DWord' 1 -RequiresAdmin $true | Out-Null
-                        Log "Network optimizations applied" 'Success'
+                        Log 'Network optimizations applied' 'Success'
                     }
                     'CPUCoreParkDisable' {
                         Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583" "ValueMax" 'DWord' 0 -RequiresAdmin $true | Out-Null
-                        Log "CPU core parking disabled" 'Success'
+                        Log 'CPU core parking disabled' 'Success'
                     }
                 }
             }
         }
 
-        # Apply process priority optimization
         if ($profile.Priority -and $GameProfile.Process) {
+            try {
                 switch ($profile.Priority) {
-                    'High' { $GameProfile.Process.PriorityClass = 'High' }
+                    'High'        { $GameProfile.Process.PriorityClass = 'High' }
                     'AboveNormal' { $GameProfile.Process.PriorityClass = 'AboveNormal' }
-                    'Normal' { $GameProfile.Process.PriorityClass = 'Normal' }
-
+                    'Normal'      { $GameProfile.Process.PriorityClass = 'Normal' }
                 }
                 Log "Process priority set to $($profile.Priority) for $($profile.DisplayName)" 'Success'
+            } catch {
                 Log "Could not set process priority: $($_.Exception.Message)" 'Warning'
             }
         }
 
         Log "Auto-optimization completed for: $($profile.DisplayName)" 'Success'
-
+    } catch {
         Log "Error during auto-optimization: $($_.Exception.Message)" 'Error'
+    }
+}
 
 function Get-CloudGamingServices {
     <#
