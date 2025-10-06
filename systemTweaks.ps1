@@ -218,6 +218,7 @@ function Apply-EnhancedSystemOptimizations {
 
     # Automatic Disk Defragmentation and SSD Trimming
     if ($Settings.AutoDiskOptimization) {
+        try {
             # Check if SSD or HDD and apply appropriate optimization
             $drives = Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
             foreach ($drive in $drives) {
@@ -234,16 +235,19 @@ function Apply-EnhancedSystemOptimizations {
                         # HDD defragmentation
                         Optimize-Volume -DriveLetter $driveLetter -Defrag -Verbose
                         Log "Disk defragmentation applied for drive $($drive.DeviceID)" 'Success'
-
                     }
+                } catch {
                     Log "Drive optimization failed for $($drive.DeviceID): $($_.Exception.Message)" 'Warning'
                 }
             }
+        } catch {
             Log "Automatic disk optimization failed: $($_.Exception.Message)" 'Warning'
         }
+    }
 
     # Adaptive Power Management Profiles
     if ($Settings.AdaptivePowerManagement) {
+        try {
             # Create custom gaming power profile
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\GamingProfile" "FriendlyName" 'String' "KOALA Gaming Profile" -RequiresAdmin $true | Out-Null
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\GamingProfile" "Description" 'String' "Optimized for gaming performance with adaptive management" -RequiresAdmin $true | Out-Null
@@ -258,11 +262,14 @@ function Apply-EnhancedSystemOptimizations {
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\bc5038f7-23e0-4960-96da-33abaf5935ec" "ValueMin" 'DWord' 100 -RequiresAdmin $true | Out-Null
 
             Log "Adaptive power management profiles configured" 'Success'
+        } catch {
             Log "Failed to configure adaptive power management: $($_.Exception.Message)" 'Warning'
         }
+    }
 
     # Enhanced Paging File Management
     if ($Settings.EnhancedPagingFile) {
+        try {
             # Calculate optimal paging file size based on RAM
             $totalRAM = (Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory / 1GB
             $optimalPageFile = [Math]::Round($totalRAM * 1.5, 0) * 1024  # 1.5x RAM in MB
@@ -274,11 +281,14 @@ function Apply-EnhancedSystemOptimizations {
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" "LargeSystemCache" 'DWord' 0 -RequiresAdmin $true | Out-Null
 
             Log "Enhanced paging file management configured (Size: $optimalPageFile MB)" 'Success'
+        } catch {
             Log "Failed to configure enhanced paging file: $($_.Exception.Message)" 'Warning'
         }
+    }
 
     # DirectStorage API Optimization Enhancements
     if ($Settings.DirectStorageEnhanced) {
+        try {
             # Advanced DirectStorage configuration
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Services\stornvme\Parameters\Device" "ForcedPhysicalSectorSizeInBytes" 'DWord' 4096 -RequiresAdmin $true | Out-Null
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" "NtfsDisableLastAccessUpdate" 'DWord' 1 -RequiresAdmin $true | Out-Null
@@ -295,8 +305,12 @@ function Apply-EnhancedSystemOptimizations {
             Set-Reg "HKLM:\SYSTEM\CurrentControlSet\Enum\PCI\VEN_*\*\Device Parameters\Interrupt Management\MessageSignaledInterruptProperties" "MSISupported" 'DWord' 1 -RequiresAdmin $true | Out-Null
 
             Log "Enhanced DirectStorage API optimizations applied" 'Success'
+        } catch {
             Log "Failed to apply DirectStorage enhancements: $($_.Exception.Message)" 'Warning'
         }
+    }
 
     Log "Enhanced system optimizations completed" 'Success'
+
+}
 
