@@ -1,12 +1,11 @@
-# KOALA-UDP — Auto-Split (UTF-8 with BOM, adjusted mapping)
+# KOALA Optimizer V3 (Split Edition)
 
-This build moves **Event Handlers**, **Initialize Application**, **Start Application**, and
-**Invoke-PanelActions** sections into `gui.ps1` to avoid splitting `try { } catch { }` pairs
-across files. All files are saved with **UTF-8 with BOM**.
+This repository contains the split PowerShell modules that make up the KOALA Optimizer v3 experience. Each `.ps1` file focuses on a specific feature area (helpers, GUI, system tweaks, gaming automation, etc.) so that problems can be diagnosed without dealing with one monolithic script.
 
 ## Quick Start
+
 ```powershell
-.\Run-Me-First.ps1
+./Run-Me-First.ps1
 ```
 
 ## Update or merge into a single script

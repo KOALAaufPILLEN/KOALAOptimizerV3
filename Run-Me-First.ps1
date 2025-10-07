@@ -1,4 +1,3 @@
-﻿# Run-Me-First.ps1 — Unblock, set policy for session, and launch KOALA-UDP
 [CmdletBinding()]
 param()
 
@@ -6,7 +5,7 @@ try {
     Write-Host "Unblocking files..." -ForegroundColor Cyan
     Get-ChildItem -Recurse -File $PSScriptRoot | Unblock-File -ErrorAction SilentlyContinue
 } catch {
-    # Non-fatal; continue even if Unblock-File is unavailable
+    Write-Warning "Unable to unblock all files: $($_.Exception.Message)"
 }
 
 Write-Host "Setting ExecutionPolicy = Bypass for this session..." -ForegroundColor Cyan

@@ -1,4 +1,3 @@
-﻿# main.ps1 — Auto-generated split from V3-testing.ps1 (adjusted mapping)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 

@@ -34,7 +34,10 @@ param(
     [string]$Output = 'KOALAOptimizerV3-full.ps1',
 
     [Parameter()]
-    [switch]$SkipDownload
+    [switch]$SkipDownload,
+
+    [Parameter()]
+    [switch]$SkipExecutable
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,3 +132,50 @@ $allLines.AddRange($entryPoint)
 $allLines | Set-Content -Path $mergedPath -Encoding UTF8
 
 Write-Host "Merged script written to $mergedPath" -ForegroundColor Green
+
+if (-not $SkipExecutable) {
+    $exeOutput = [System.IO.Path]::ChangeExtension($mergedPath, '.exe')
+    Write-Host "Building standalone executable -> $exeOutput" -ForegroundColor Green
+
+    $tempDir = Join-Path $scriptRoot 'temp-merger-tools'
+    if (-not (Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+    }
+
+    $ps2exeUrl = 'https://raw.githubusercontent.com/MScholtes/PS2EXE/master/ps2exe.ps1'
+    $ps2exePath = Join-Path $tempDir 'ps2exe.ps1'
+
+    try {
+        Write-Host 'Downloading PS2EXE converter ...' -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $ps2exeUrl -OutFile $ps2exePath -UseBasicParsing
+    } catch {
+        Write-Host "Failed to download PS2EXE: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'Skipping executable creation. You can rerun with -SkipExecutable:$false after fixing connectivity.' -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $ps2exeArgs = @(
+            '-inputFile', $mergedPath,
+            '-outputFile', $exeOutput,
+            '-noConsole',
+            '-title', 'KOALA Optimizer V3',
+            '-description', 'Merged KOALA Optimizer V3 toolkit'
+        )
+
+        Write-Host 'Converting merged script to executable ...' -ForegroundColor Cyan
+        & $ps2exePath @ps2exeArgs
+        Write-Host "Executable written to $exeOutput" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to create executable: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'The merged script is still available. You can rerun merger-update.ps1 to retry the conversion.' -ForegroundColor Yellow
+    } finally {
+        if (Test-Path $ps2exePath) {
+            Remove-Item -Path $ps2exePath -Force -ErrorAction SilentlyContinue
+        }
+
+        if ((Get-ChildItem -Path $tempDir -Force | Measure-Object).Count -eq 0) {
+            Remove-Item -Path $tempDir -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
