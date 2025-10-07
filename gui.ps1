@@ -9,31 +9,31 @@ $xamlContent = @'
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         SizeToContent="Manual">
-  <Window.Resources>
-    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0F0F12"/>
-    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#141416"/>
-    <SolidColorBrush x:Key="SidebarAccentBrush" Color="#A855F7"/>
-    <SolidColorBrush x:Key="SidebarHoverBrush" Color="#222227"/>
-    <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#A855F7"/>
-    <SolidColorBrush x:Key="SidebarSelectedForegroundBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#151517"/>
-    <SolidColorBrush x:Key="HeaderBorderBrush" Color="#2A2A2E"/>
-    <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1A1A1D"/>
-    <SolidColorBrush x:Key="ContentBackgroundBrush" Color="#151517"/>
-    <SolidColorBrush x:Key="CardBorderBrush" Color="#2A2A2E"/>
-    <SolidColorBrush x:Key="HeroCardBrush" Color="#1A1A1D"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="#A855F7"/>
-    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#9CA3AF"/>
-    <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E"/>
-    <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B"/>
-    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444"/>
-    <SolidColorBrush x:Key="InfoBrush" Color="#60A5FA"/>
-    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#151517"/>
-    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#2A2A2E"/>
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#222227"/>
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#1B1B1F"/>
-    <SolidColorBrush x:Key="HeroChipBrush" Color="#151517"/>
+    <Window.Resources>
+      <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0F0B1E"/>
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1C1733"/>
+      <SolidColorBrush x:Key="SidebarAccentBrush" Color="#8F6FFF"/>
+      <SolidColorBrush x:Key="SidebarHoverBrush" Color="#2A214F"/>
+      <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#403270"/>
+      <SolidColorBrush x:Key="SidebarSelectedForegroundBrush" Color="#F7F6FF"/>
+      <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#1D1834"/>
+      <SolidColorBrush x:Key="HeaderBorderBrush" Color="#2E2752"/>
+      <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1D1834"/>
+      <SolidColorBrush x:Key="ContentBackgroundBrush" Color="#141129"/>
+      <SolidColorBrush x:Key="CardBorderBrush" Color="#2E2752"/>
+      <SolidColorBrush x:Key="HeroCardBrush" Color="#221C3F"/>
+      <SolidColorBrush x:Key="AccentBrush" Color="#8F6FFF"/>
+      <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="SecondaryTextBrush" Color="#B8B5D1"/>
+      <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E"/>
+      <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B"/>
+      <SolidColorBrush x:Key="DangerBrush" Color="#EF4444"/>
+      <SolidColorBrush x:Key="InfoBrush" Color="#38BDF8"/>
+      <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#221C3F"/>
+      <SolidColorBrush x:Key="ButtonBorderBrush" Color="#2E2752"/>
+      <SolidColorBrush x:Key="ButtonHoverBrush" Color="#2A214F"/>
+      <SolidColorBrush x:Key="ButtonPressedBrush" Color="#241E45"/>
+      <SolidColorBrush x:Key="HeroChipBrush" Color="#2A214F"/>
 
     <Style x:Key="BaseControlStyle" TargetType="Control">
       <Setter Property="FontFamily" Value="Segoe UI"/>
