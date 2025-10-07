@@ -11,7 +11,7 @@ try {
 Write-Host "Setting ExecutionPolicy = Bypass for this session..." -ForegroundColor Cyan
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
-$main = Join-Path $PSScriptRoot 'main.ps1'
+$main = Join-Path $PSScriptRoot "main.ps1"
 if (Test-Path $main) {
     Write-Host "Launching main.ps1 ..." -ForegroundColor Green
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $main

@@ -1,146 +1,153 @@
-﻿# ---------- Backup and Restore Functions ----------
+# KOALA Optimizer – backup and configuration helpers
+
 function Get-NetshTcpGlobal {
-        $output = netsh int tcp show global
-        $settings = @{}
+    <#
+        .SYNOPSIS
+        Return the current TCP stack configuration that `netsh int tcp show global` exposes.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $settings = @{}
+
+    try {
+        $output = netsh int tcp show global 2>$null
         foreach ($line in $output) {
             if ($line -match '^\s*(.+?)\s*:\s*(.+?)\s*$') {
-                $key = $matches[1].Trim()
-                $value = $matches[2].Trim()
-                $settings[$key] = $value
-
+                $settings[$matches[1].Trim()] = $matches[2].Trim()
             }
         }
-        return $settings
-        return @{}
+    } catch {
+        Log "Unable to read TCP global state: $($_.Exception.Message)" 'Warning'
     }
 
-# ---------- Registry File Creation Function ----------
+    return $settings
+}
+
 function Create-RegFile {
+    <#
+        .SYNOPSIS
+        Persist registry data from a backup payload as a .reg file.
+    #>
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        $BackupData,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory)]
+        [hashtable]$BackupData,
+        [Parameter(Mandatory)]
         [string]$OutputPath
     )
 
-        $regContent = @"
-Windows Registry Editor Version 5.00
+    try {
+        $builder = @()
+        $builder += 'Windows Registry Editor Version 5.00'
+        $builder += ''
+        $builder += '; KOALA Gaming Optimizer – Registry Backup'
+        $builder += "; Created: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        $builder += "; Version: $($BackupData.Version)"
+        $builder += ''
 
-; KOALA Gaming Optimizer - Registry Backup
-; Created: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-; Version: $($BackupData.Version)
-;
-; Double-click this file to restore registry settings to their backed-up values
-; WARNING: This will modify your Windows registry. Create a backup before proceeding.
+        foreach ($regPath in $BackupData.Registry.GetEnumerator()) {
+            $path = $regPath.Key -replace '^HKLM:', '[HKEY_LOCAL_MACHINE' -replace '^HKCU:', '[HKEY_CURRENT_USER' -replace '^HKCR:', '[HKEY_CLASSES_ROOT' -replace '^HKU:', '[HKEY_USERS' -replace '^HKCC:', '[HKEY_CURRENT_CONFIG'
+            $builder += "$path]"
 
-"@
-
-        # Convert registry data to .reg format
-        foreach ($regPath in $BackupData.Registry.PSObject.Properties.Name) {
-            $regPathFormatted = $regPath -replace '^HKLM:', '[HKEY_LOCAL_MACHINE'
-            $regPathFormatted = $regPathFormatted -replace '^HKCU:', '[HKEY_CURRENT_USER'
-            $regPathFormatted = $regPathFormatted -replace '^HKCR:', '[HKEY_CLASSES_ROOT'
-            $regPathFormatted = $regPathFormatted -replace '^HKU:', '[HKEY_USERS'
-            $regPathFormatted = $regPathFormatted -replace '^HKCC:', '[HKEY_CURRENT_CONFIG'
-            $regPathFormatted += ']'
-
-            $regContent += "`n$regPathFormatted`n"
-
-            foreach ($regName in $BackupData.Registry.$regPath.PSObject.Properties.Name) {
-                $value = $BackupData.Registry.$regPath.$regName
-                if ($null -ne $value) {
-                    # Format as DWORD value
-                    $regContent += "`"$regName`"=dword:$('{0:x8}' -f $value)`n"
-
+            foreach ($entry in $regPath.Value.GetEnumerator()) {
+                $keyName = [string]$entry.Key
+                if ($null -ne $entry.Value) {
+                    $formatted = '{0:x8}' -f [uint32]$entry.Value
+                    $builder += '"{0}"=dword:{1}' -f $keyName, $formatted
                 } else {
-                    # Delete the value if it was null
-                    $regContent += "`"$regName`"=-`n"
+                    $builder += '"{0}"=-' -f $keyName
                 }
             }
+
+            $builder += ''
         }
 
-        # Add NIC registry settings
-        foreach ($nicPath in $BackupData.RegistryNICs.PSObject.Properties.Name) {
-            $nicData = $BackupData.RegistryNICs.$nicPath
-            $nicPathFormatted = $nicPath -replace '^HKLM:', '[HKEY_LOCAL_MACHINE'
-            $nicPathFormatted += ']'
-
-            $regContent += "`n$nicPathFormatted`n"
-
-            if ($null -ne $nicData.TcpAckFrequency) {
-                $regContent += "`"TcpAckFrequency`"=dword:$('{0:x8}' -f $nicData.TcpAckFrequency)`n"
+        foreach ($nic in $BackupData.RegistryNICs.GetEnumerator()) {
+            $path = $nic.Key -replace '^HKLM:', '[HKEY_LOCAL_MACHINE'
+            $builder += "$path]"
+            if ($null -ne $nic.Value.TcpAckFrequency) {
+                $formattedAck = '{0:x8}' -f [uint32]$nic.Value.TcpAckFrequency
+                $builder += '"TcpAckFrequency"=dword:{0}' -f $formattedAck
             }
-            if ($null -ne $nicData.TCPNoDelay) {
-                $regContent += "`"TCPNoDelay`"=dword:$('{0:x8}' -f $nicData.TCPNoDelay)`n"
+            if ($null -ne $nic.Value.TCPNoDelay) {
+                $formattedNodelay = '{0:x8}' -f [uint32]$nic.Value.TCPNoDelay
+                $builder += '"TCPNoDelay"=dword:{0}' -f $formattedNodelay
             }
+            $builder += ''
         }
 
-        Set-Content -Path $OutputPath -Value $regContent -Encoding Unicode -ErrorAction Stop
-        Log "Registry file created successfully: $OutputPath" 'Success'
-
-        Log "Failed to create registry file: $($_.Exception.Message)" 'Error'
+        $builder | Set-Content -Path $OutputPath -Encoding Unicode
+        Log "Registry backup saved to $OutputPath" 'Success'
+    } catch {
+        Log "Failed to build registry export: $($_.Exception.Message)" 'Error'
+        throw
+    }
+}
 
 function Create-Backup {
-    Log "Creating comprehensive backup with user-selected location..." 'Info'
+    <#
+        .SYNOPSIS
+        Capture registry, service, TCP and power configuration to a user selected location.
+    #>
+    [CmdletBinding()]
+    param()
 
-    # Allow user to select backup location and format
-    $saveDialog = New-Object Microsoft.Win32.SaveFileDialog; $saveDialog.Title = "Select Backup Location"
-    $saveDialog.Filter = "JSON files (*.json)|*.json|Registry files (*.reg)|*.reg|All files (*.*)|*.*"
-    $saveDialog.DefaultExt = ".json"
-    $saveDialog.FileName = "KOALA_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-    $saveDialog.InitialDirectory = [Environment]::GetFolderPath("MyDocuments")
+    Log 'Creating comprehensive backup with user-selected location...' 'Info'
 
-    if (-not $saveDialog.ShowDialog()) {
-        Log "Backup cancelled by user" 'Info'
+    $dialog = New-Object Microsoft.Win32.SaveFileDialog
+    $dialog.Title = 'Select Backup Location'
+    $dialog.Filter = 'JSON files (*.json)|*.json|Registry files (*.reg)|*.reg|All files (*.*)|*.*'
+    $dialog.DefaultExt = '.json'
+    $dialog.FileName = "KOALA_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    $dialog.InitialDirectory = [Environment]::GetFolderPath('MyDocuments')
+
+    if (-not $dialog.ShowDialog()) {
+        Log 'Backup cancelled by user' 'Info'
         return
     }
 
-    $selectedPath = $saveDialog.FileName
-    $selectedExtension = [System.IO.Path]::GetExtension($selectedPath).ToLower()
+    $selectedPath = $dialog.FileName
+    $selectedExtension = [System.IO.Path]::GetExtension($selectedPath).ToLowerInvariant()
 
-    Log "User selected backup path: $selectedPath (Format: $selectedExtension)" 'Info'
-
-    $backupData = @{
-        Timestamp = Get-Date
-        Version = "3.0"
-        GPU = Get-GPUVendor
+    $backupData = [ordered]@{
+        Timestamp       = Get-Date
+        Version         = '3.0'
+        GPU             = Get-GPUVendor
         AdminPrivileges = Test-AdminPrivileges
-        Registry = @{}
-        RegistryNICs = @{}
-        Services = @{}
-        NetshTcp = @{}
-        PowerSettings = @{}
+        Registry        = @{}
+        RegistryNICs    = @{}
+        Services        = @{}
+        NetshTcp        = @{}
+        PowerSettings   = @{}
     }
 
-    # Extended registry backup list
     $regList = @(
-        # Gaming optimizations
-        @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"; Name="SystemResponsiveness"},
-        @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"; Name="NetworkThrottlingIndex"},
-        @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="GPU Priority"},
-        @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="Priority"},
-        @{Path="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"; Name="Scheduling Category"},
-        @{Path="HKCU:\System\GameConfigStore"; Name="GameDVR_Enabled"},
-        @{Path="HKCU:\System\GameConfigStore"; Name="GameDVR_FSEBehaviorMode"},
-        @{Path="HKCU:\System\GameConfigStore"; Name="GameDVR_FSEBehavior"},
-        @{Path="HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR"; Name="AppCaptureEnabled"},
-        @{Path="HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR"; Name="GameDVR_Enabled"}
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'; Name = 'SystemResponsiveness' }
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'; Name = 'NetworkThrottlingIndex' }
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'GPU Priority' }
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'Priority' }
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'Scheduling Category' }
+        @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_Enabled' }
+        @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_FSEBehaviorMode' }
+        @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_FSEBehavior' }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR'; Name = 'AppCaptureEnabled' }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR'; Name = 'GameDVR_Enabled' }
     )
 
-    # Backup registry values
-    foreach ($r in $regList) {
-            $value = Get-Reg $r.Path $r.Name
-            if (-not $backupData.Registry.ContainsKey($r.Path)) {
-                $backupData.Registry[$r.Path] = @{}
-
+    foreach ($entry in $regList) {
+        try {
+            $value = Get-Reg $entry.Path $entry.Name
+            if (-not $backupData.Registry.ContainsKey($entry.Path)) {
+                $backupData.Registry[$entry.Path] = @{}
             }
-            $backupData.Registry[$r.Path][$r.Name] = $value
-            # Silently continue
+            $backupData.Registry[$entry.Path][$entry.Name] = $value
+        } catch {
+            Log "Failed to read $($entry.Path)::$($entry.Name): $($_.Exception.Message)" 'Warning'
         }
     }
 
-    # Per-NIC registry backup
-    $nicRoot = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+    $nicRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
     if (Test-Path $nicRoot) {
         Get-ChildItem $nicRoot | ForEach-Object {
             $nicPath = $_.PSPath
@@ -149,19 +156,18 @@ function Create-Backup {
             if ($null -ne $ack -or $null -ne $nodelay) {
                 $backupData.RegistryNICs[$nicPath] = @{
                     TcpAckFrequency = $ack
-                    TCPNoDelay = $nodelay
+                    TCPNoDelay      = $nodelay
                 }
             }
         }
     }
 
-    # Service backup
     $svcTargets = @(
-        "XblGameSave", "XblAuthManager", "XboxGipSvc", "XboxNetApiSvc",
-        "Spooler", "SysMain", "DiagTrack", "WSearch", "NvTelemetryContainer",
-        "AMD External Events", "Fax", "RemoteRegistry", "MapsBroker",
-        "WMPNetworkSvc", "WpnUserService", "bthserv", "TabletInputService",
-        "TouchKeyboard", "WerSvc", "PcaSvc", "Themes"
+        'XblGameSave','XblAuthManager','XboxGipSvc','XboxNetApiSvc',
+        'Spooler','SysMain','DiagTrack','WSearch','NvTelemetryContainer',
+        'AMD External Events','Fax','RemoteRegistry','MapsBroker',
+        'WMPNetworkSvc','WpnUserService','bthserv','TabletInputService',
+        'TouchKeyboard','WerSvc','PcaSvc','Themes'
     )
 
     foreach ($serviceName in $svcTargets) {
@@ -171,256 +177,228 @@ function Create-Backup {
         }
     }
 
-    # Network settings backup
     $backupData.NetshTcp = Get-NetshTcpGlobal
 
-    # Power settings backup
-        $backupData.PowerSettings = @{
-            ActivePowerScheme = (powercfg /getactivescheme 2>$null) -replace '^.*: ', '' -replace ' \(.*\)', ''
-
+    try {
+        $scheme = (powercfg /getactivescheme 2>$null)
+        if ($scheme) {
+            $backupData.PowerSettings = @{ ActivePowerScheme = ($scheme -replace '^.*: ', '') -replace ' \(.*\)', '' }
         }
-        # Continue
+    } catch {
+        Log "Unable to capture power scheme: $($_.Exception.Message)" 'Warning'
+    }
 
-    # Save backup based on user selection
-        if ($selectedExtension -eq ".json") {
-            # Save as JSON
-            $backupJson = $backupData | ConvertTo-Json -Depth 10 -ErrorAction Stop
-            Set-Content -Path $selectedPath -Value $backupJson -Encoding UTF8 -ErrorAction Stop
-            Log "JSON backup successfully saved to: $selectedPath" 'Success'
+    try {
+        switch ($selectedExtension) {
+            '.json' {
+                $json = $backupData | ConvertTo-Json -Depth 10
+                Set-Content -Path $selectedPath -Value $json -Encoding UTF8
+                $regPath = $selectedPath -replace '\.json$', '.reg'
+                Create-RegFile -BackupData $backupData -OutputPath $regPath
+                $message = "JSON backup saved to:`n$selectedPath`n`nRegistry export:`n$regPath"
+                break
+            }
+            '.reg' {
+                Create-RegFile -BackupData $backupData -OutputPath $selectedPath
+                $jsonPath = $selectedPath -replace '\.reg$', '.json'
+                $json = $backupData | ConvertTo-Json -Depth 10
+                Set-Content -Path $jsonPath -Value $json -Encoding UTF8
+                $message = "Registry backup saved to:`n$selectedPath`n`nJSON copy:`n$jsonPath"
+                $selectedPath = $jsonPath
+                break
+            }
+            default {
+                $json = $backupData | ConvertTo-Json -Depth 10
+                Set-Content -Path $selectedPath -Value $json -Encoding UTF8
+                $message = "Backup saved to:`n$selectedPath"
+                break
+            }
+        }
 
-            # Also create .reg file in the same directory
-            $regFilePath = $selectedPath -replace '\.json$', '.reg'
-            Create-RegFile -BackupData $backupData -OutputPath $regFilePath
-
-            [System.Windows.MessageBox]::Show(
-                "Backup created successfully!`n`nJSON Backup: $selectedPath`nRegistry File: $regFilePath`nTimestamp: $(Get-Date)`n`nThe JSON file contains complete backup data for script restoration.`nThe .reg file can be double-clicked to restore registry settings directly.",
-                "Backup Complete",
-                'OK',
-                'Information'
-            )
-
-        } elseif ($selectedExtension -eq ".reg") {
-            # Save as .reg file only
-            Create-RegFile -BackupData $backupData -OutputPath $selectedPath
-
-            # Also save JSON version for complete restoration
-            $jsonFilePath = $selectedPath -replace '\.reg$', '.json'
-            $backupJson = $backupData | ConvertTo-Json -Depth 10 -ErrorAction Stop
-            Set-Content -Path $jsonFilePath -Value $backupJson -Encoding UTF8 -ErrorAction Stop
-
-            [System.Windows.MessageBox]::Show(
-                "Backup created successfully!`n`nRegistry File: $selectedPath`nJSON Backup: $jsonFilePath`nTimestamp: $(Get-Date)`n`nDouble-click the .reg file to restore registry settings.`nThe JSON file contains complete backup data for script restoration.",
-                "Backup Complete",
-                'OK',
-                'Information'
-            )
-            # Default to JSON for unknown extensions
-            $backupJson = $backupData | ConvertTo-Json -Depth 10 -ErrorAction Stop
-            Set-Content -Path $selectedPath -Value $backupJson -Encoding UTF8 -ErrorAction Stop
-            Log "Backup saved as JSON to: $selectedPath" 'Success'
-
-            [System.Windows.MessageBox]::Show(
-                "Backup created successfully!`n`nBackup File: $selectedPath`nTimestamp: $(Get-Date)`n`nSaved in JSON format for complete restoration.",
-                "Backup Complete",
-                'OK',
-                'Information'
-            )
-
-        # Update the global backup path for restore operations
-        $global:BackupPath = if ($selectedExtension -eq ".reg") { $selectedPath -replace '\.reg$', '.json' } else { $selectedPath }
-
+        $global:BackupPath = $selectedPath
+        [System.Windows.MessageBox]::Show($message, 'Backup Complete', 'OK', 'Information') | Out-Null
+        Log "Backup saved successfully to $selectedPath" 'Success'
+    } catch {
         Log "Failed to save backup: $($_.Exception.Message)" 'Error'
-        [System.Windows.MessageBox]::Show(
-            "Failed to save backup!`n`nError: $($_.Exception.Message)`n`nPlease check the selected location and try again.",
-            "Backup Failed",
-            'OK',
-            'Error'
-        )
+        [System.Windows.MessageBox]::Show("Failed to save backup:`n$($_.Exception.Message)", 'Backup Failed', 'OK', 'Error') | Out-Null
+    }
+}
 
 function Restore-FromBackup {
-    if (-not (Test-Path $BackupPath)) {
-        Log "No backup file found at: $BackupPath" 'Error'
-        [System.Windows.MessageBox]::Show(
-            "No backup file found!`n`nPlease create a backup before applying optimizations.",
-            "Backup Not Found",
-            'OK',
-            'Warning'
-        )
+    <#
+        .SYNOPSIS
+        Restore the system state from a previously generated backup file.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Path = $global:BackupPath
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        Log "No backup file found at: $Path" 'Error'
+        [System.Windows.MessageBox]::Show('No backup file was found. Create a backup before attempting to restore.', 'Backup Not Found', 'OK', 'Warning') | Out-Null
         return $false
     }
 
-        $backupData = Get-Content $BackupPath -Raw | ConvertFrom-Json
-        Log "Restoring from backup created: $($backupData.Timestamp)" 'Info'
+    try {
+        $backupData = Get-Content -Path $Path -Raw | ConvertFrom-Json
 
-        # Restore registry values
-        foreach ($regPath in $backupData.Registry.PSObject.Properties.Name) {
-            foreach ($regName in $backupData.Registry.$regPath.PSObject.Properties.Name) {
-                $value = $backupData.Registry.$regPath.$regName
-                if ($null -ne $value) {
-                    Set-Reg $regPath $regName 'DWord' $value -RequiresAdmin $true | Out-Null
-
+        foreach ($regPath in $backupData.Registry.GetEnumerator()) {
+            foreach ($entry in $regPath.Value.GetEnumerator()) {
+                if ($null -ne $entry.Value) {
+                    Set-Reg $regPath.Key $entry.Key 'DWord' $entry.Value -RequiresAdmin $true | Out-Null
+                } else {
+                    Remove-RegValue -Path $regPath.Key -Name $entry.Key -RequiresAdmin $true
                 }
             }
         }
 
-        # Restore NIC registry values
-        foreach ($nicPath in $backupData.RegistryNICs.PSObject.Properties.Name) {
-            $nicData = $backupData.RegistryNICs.$nicPath
-            if ($nicData.TcpAckFrequency) {
-                Set-Reg $nicPath "TcpAckFrequency" 'DWord' $nicData.TcpAckFrequency -RequiresAdmin $true | Out-Null
+        foreach ($nic in $backupData.RegistryNICs.GetEnumerator()) {
+            if ($nic.Value.TcpAckFrequency) {
+                Set-Reg $nic.Key 'TcpAckFrequency' 'DWord' $nic.Value.TcpAckFrequency -RequiresAdmin $true | Out-Null
             }
-            if ($nicData.TCPNoDelay) {
-                Set-Reg $nicPath "TCPNoDelay" 'DWord' $nicData.TCPNoDelay -RequiresAdmin $true | Out-Null
+            if ($nic.Value.TCPNoDelay) {
+                Set-Reg $nic.Key 'TCPNoDelay' 'DWord' $nic.Value.TCPNoDelay -RequiresAdmin $true | Out-Null
             }
         }
 
-        # Restore services
-        foreach ($serviceName in $backupData.Services.PSObject.Properties.Name) {
-            $serviceData = $backupData.Services.$serviceName
-                Set-Service -Name $serviceName -StartupType $serviceData.StartType -ErrorAction SilentlyContinue
-                if ($serviceData.Status -eq 'Running') {
-                    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
-
-                }
+        foreach ($service in $backupData.Services.GetEnumerator()) {
+            Set-Service -Name $service.Key -StartupType $service.Value.StartType -ErrorAction SilentlyContinue
+            if ($service.Value.Status -eq 'Running') {
+                Start-Service -Name $service.Key -ErrorAction SilentlyContinue
+            } else {
+                Stop-Service -Name $service.Key -ErrorAction SilentlyContinue
+            }
         }
 
-        Log "Backup restored successfully!" 'Success'
-
-        [System.Windows.MessageBox]::Show(
-            "Backup restored successfully!`n`nSystem has been reverted to previous state.",
-            "Restore Complete",
-            'OK',
-            'Information'
-        )
-
+        Log 'Backup restored successfully.' 'Success'
+        [System.Windows.MessageBox]::Show('Backup restored successfully.', 'Restore Complete', 'OK', 'Information') | Out-Null
         return $true
-
+    } catch {
         Log "Failed to restore backup: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show("Failed to restore backup:`n$($_.Exception.Message)", 'Restore Failed', 'OK', 'Error') | Out-Null
         return $false
     }
+}
 
-# ---------- Configuration Import/Export ----------
 function Export-Configuration {
-        $config = @{
-            Timestamp = Get-Date
-            Version = "3.0"
-            GameProfile = if ($cmbGameProfile.SelectedItem) { $cmbGameProfile.SelectedItem.Tag } else { "custom" }
-            CustomGameExecutable = if ($txtCustomGame.Text) { $txtCustomGame.Text.Trim() } else { "" }
-            MenuMode = $global:MenuMode
-            AutoOptimize = $global:AutoOptimizeEnabled
-            NetworkSettings = @{
-                TCPAck = $chkAck.IsChecked
-                DelAckTicks = $chkDelAckTicks.IsChecked
-                NetworkThrottling = $chkThrottle.IsChecked
-                NagleAlgorithm = $chkNagle.IsChecked
-                TCPTimestamps = $chkTcpTimestamps.IsChecked
-                ECN = $chkTcpECN.IsChecked
-                RSS = $chkRSS.IsChecked
-                RSC = $chkRSC.IsChecked
-                AutoTuning = $chkTcpAutoTune.IsChecked
+    <#
+        .SYNOPSIS
+        Persist the current UI selections and runtime flags to a JSON configuration file.
+    #>
+    [CmdletBinding()]
+    param()
 
+    try {
+        $config = [ordered]@{
+            Timestamp            = Get-Date
+            Version              = '3.0'
+            GameProfile          = if ($cmbGameProfile.SelectedItem) { $cmbGameProfile.SelectedItem.Tag } else { 'custom' }
+            CustomGameExecutable = if ($txtCustomGame.Text) { $txtCustomGame.Text.Trim() } else { '' }
+            MenuMode             = $global:MenuMode
+            AutoOptimize         = $global:AutoOptimizeEnabled
+            NetworkSettings      = @{
+                TCPAck          = $chkAck.IsChecked
+                DelAckTicks     = $chkDelAckTicks.IsChecked
+                NetworkThrottle = $chkThrottle.IsChecked
+                NagleAlgorithm  = $chkNagle.IsChecked
+                TCPTimestamps   = $chkTcpTimestamps.IsChecked
+                ECN             = $chkTcpECN.IsChecked
+                RSS             = $chkRSS.IsChecked
+                RSC             = $chkRSC.IsChecked
+                AutoTuning      = $chkTcpAutoTune.IsChecked
             }
             GamingSettings = @{
                 Responsiveness = $chkResponsiveness.IsChecked
-                GamesTask = $chkGamesTask.IsChecked
-                GameDVR = $chkGameDVR.IsChecked
-                FSE = $chkFSE.IsChecked
-                GpuScheduler = $chkGpuScheduler.IsChecked
-                TimerRes = $chkTimerRes.IsChecked
-                VisualEffects = $chkVisualEffects.IsChecked
-                Hibernation = $chkHibernation.IsChecked
+                GamesTask      = $chkGamesTask.IsChecked
+                GameDVR        = $chkGameDVR.IsChecked
+                FSE            = $chkFSE.IsChecked
+                GpuScheduler   = $chkGpuScheduler.IsChecked
+                TimerRes       = $chkTimerRes.IsChecked
+                VisualEffects  = $chkVisualEffects.IsChecked
+                Hibernation    = $chkHibernation.IsChecked
             }
         }
 
-        $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
-        $saveDialog.Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
-        $saveDialog.DefaultExt = ".json"
-        $saveDialog.FileName = "KOALAConfig_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+        $dialog = New-Object Microsoft.Win32.SaveFileDialog
+        $dialog.Filter = 'JSON files (*.json)|*.json|All files (*.*)|*.*'
+        $dialog.DefaultExt = '.json'
+        $dialog.FileName = "KOALAConfig_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
 
-        if ($saveDialog.ShowDialog()) {
-            $configJson = $config | ConvertTo-Json -Depth 10
-            Set-Content -Path $saveDialog.FileName -Value $configJson -Encoding UTF8
-            Log "Configuration exported to: $($saveDialog.FileName)" 'Success'
-
-            [System.Windows.MessageBox]::Show(
-                "Configuration exported successfully!`n`nLocation: $($saveDialog.FileName)",
-                "Export Complete",
-                'OK',
-                'Information'
-            )
+        if ($dialog.ShowDialog()) {
+            $config | ConvertTo-Json -Depth 10 | Set-Content -Path $dialog.FileName -Encoding UTF8
+            Log "Configuration exported to: $($dialog.FileName)" 'Success'
+            [System.Windows.MessageBox]::Show("Configuration exported to:`n$($dialog.FileName)", 'Export Complete', 'OK', 'Information') | Out-Null
         }
+    } catch {
         Log "Failed to export configuration: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show("Failed to export configuration:`n$($_.Exception.Message)", 'Export Failed', 'OK', 'Error') | Out-Null
     }
+}
 
 function Import-Configuration {
-        $openDialog = New-Object Microsoft.Win32.OpenFileDialog
-        $openDialog.Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
-        $openDialog.DefaultExt = ".json"
+    <#
+        .SYNOPSIS
+        Load a JSON configuration file and apply the captured UI selections.
+    #>
+    [CmdletBinding()]
+    param()
 
-        if ($openDialog.ShowDialog()) {
-            $configJson = Get-Content $openDialog.FileName -Raw
-            $config = $configJson | ConvertFrom-Json
+    try {
+        $dialog = New-Object Microsoft.Win32.OpenFileDialog
+        $dialog.Filter = 'JSON files (*.json)|*.json|All files (*.*)|*.*'
+        $dialog.DefaultExt = '.json'
 
-            # Apply configuration
-            if ($config.GameProfile) {
-                foreach ($item in $cmbGameProfile.Items) {
-                    if ($item.Tag -eq $config.GameProfile) {
-                        $cmbGameProfile.SelectedItem = $item
-                        break
+        if (-not $dialog.ShowDialog()) {
+            return
+        }
 
-                    }
+        $config = Get-Content -Path $dialog.FileName -Raw | ConvertFrom-Json
+
+        if ($config.GameProfile) {
+            foreach ($item in $cmbGameProfile.Items) {
+                if ($item.Tag -eq $config.GameProfile) {
+                    $cmbGameProfile.SelectedItem = $item
+                    break
                 }
             }
-
-            if ($config.CustomGameExecutable) {
-                $txtCustomGame.Text = $config.CustomGameExecutable
-            }
-
-            if ($config.MenuMode) {
-                Switch-MenuMode -Mode $config.MenuMode
-                # Menu mode control removed from header - mode managed through Options panel only
-                # foreach ($item in $cmbMenuMode.Items) {
-                #     if ($item.Tag -eq $config.MenuMode) {
-                #         $cmbMenuMode.SelectedItem = $item
-                #         break
-                #     }
-                # }
-            }
-
-            # Apply network settings
-            if ($config.NetworkSettings) {
-                $chkAck.IsChecked = $config.NetworkSettings.TCPAck
-                $chkDelAckTicks.IsChecked = $config.NetworkSettings.DelAckTicks
-                $chkThrottle.IsChecked = $config.NetworkSettings.NetworkThrottling
-                $chkNagle.IsChecked = $config.NetworkSettings.NagleAlgorithm
-                $chkTcpTimestamps.IsChecked = $config.NetworkSettings.TCPTimestamps
-                $chkTcpECN.IsChecked = $config.NetworkSettings.ECN
-                $chkRSS.IsChecked = $config.NetworkSettings.RSS
-                $chkRSC.IsChecked = $config.NetworkSettings.RSC
-                $chkTcpAutoTune.IsChecked = $config.NetworkSettings.AutoTuning
-            }
-
-            # Apply gaming settings
-            if ($config.GamingSettings) {
-                $chkResponsiveness.IsChecked = $config.GamingSettings.Responsiveness
-                $chkGamesTask.IsChecked = $config.GamingSettings.GamesTask
-                $chkGameDVR.IsChecked = $config.GamingSettings.GameDVR
-                $chkFSE.IsChecked = $config.GamingSettings.FSE
-                $chkGpuScheduler.IsChecked = $config.GamingSettings.GpuScheduler
-                $chkTimerRes.IsChecked = $config.GamingSettings.TimerRes
-                $chkVisualEffects.IsChecked = $config.GamingSettings.VisualEffects
-                $chkHibernation.IsChecked = $config.GamingSettings.Hibernation
-            }
-
-            Log "Configuration imported from: $($openDialog.FileName)" 'Success'
-
-            [System.Windows.MessageBox]::Show(
-                "Configuration imported successfully!`n`nSettings have been applied.",
-                "Import Complete",
-                'OK',
-                'Information'
-            )
         }
-        Log "Failed to import configuration: $($_.Exception.Message)" 'Error'
-    }
 
+        if ($config.CustomGameExecutable) {
+            $txtCustomGame.Text = $config.CustomGameExecutable
+        }
+
+        if ($config.MenuMode) {
+            Switch-MenuMode -Mode $config.MenuMode
+        }
+
+        if ($config.NetworkSettings) {
+            $chkAck.IsChecked            = $config.NetworkSettings.TCPAck
+            $chkDelAckTicks.IsChecked    = $config.NetworkSettings.DelAckTicks
+            $chkThrottle.IsChecked       = $config.NetworkSettings.NetworkThrottle
+            $chkNagle.IsChecked          = $config.NetworkSettings.NagleAlgorithm
+            $chkTcpTimestamps.IsChecked  = $config.NetworkSettings.TCPTimestamps
+            $chkTcpECN.IsChecked         = $config.NetworkSettings.ECN
+            $chkRSS.IsChecked            = $config.NetworkSettings.RSS
+            $chkRSC.IsChecked            = $config.NetworkSettings.RSC
+            $chkTcpAutoTune.IsChecked    = $config.NetworkSettings.AutoTuning
+        }
+
+        if ($config.GamingSettings) {
+            $chkResponsiveness.IsChecked = $config.GamingSettings.Responsiveness
+            $chkGamesTask.IsChecked      = $config.GamingSettings.GamesTask
+            $chkGameDVR.IsChecked        = $config.GamingSettings.GameDVR
+            $chkFSE.IsChecked            = $config.GamingSettings.FSE
+            $chkGpuScheduler.IsChecked   = $config.GamingSettings.GpuScheduler
+            $chkTimerRes.IsChecked       = $config.GamingSettings.TimerRes
+            $chkVisualEffects.IsChecked  = $config.GamingSettings.VisualEffects
+            $chkHibernation.IsChecked    = $config.GamingSettings.Hibernation
+        }
+
+        Log "Configuration imported from: $($dialog.FileName)" 'Success'
+        [System.Windows.MessageBox]::Show('Configuration imported successfully.', 'Import Complete', 'OK', 'Information') | Out-Null
+    } catch {
+        Log "Failed to import configuration: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show("Failed to import configuration:`n$($_.Exception.Message)", 'Import Failed', 'OK', 'Error') | Out-Null
+    }
+}

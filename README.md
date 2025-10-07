@@ -8,16 +8,17 @@ This repository contains the split PowerShell modules that make up the KOALA Opt
 ./Run-Me-First.ps1
 ```
 
-The bootstrap script unblocks the local files, relaxes the execution policy for the current session, and launches `main.ps1`, which loads every module and opens the WPF interface.
+## Update or merge into a single script
 
-## Updating or rebuilding a single file
-
-Use `merger-update.ps1` to pull the latest split modules from GitHub and rebuild both the single-file script **and** a ready-to-run executable:
+To refresh every split module from GitHub and rebuild a single-file version of the
+optimizer, run the helper script:
 
 ```powershell
-pwsh ./merger-update.ps1
+pwsh .\merger-update.ps1
 ```
 
-By default the script downloads the `main` branch of `KOALAaufPILLEN/KOALAOptimizerV3`, refreshes the local modules, and writes the merged `KOALAOptimizerV3-full.ps1` alongside a compiled `KOALAOptimizerV3-full.exe`. Override the source branch or output path with the optional parameters, pass `-SkipDownload` to merge the already-downloaded files, or `-SkipExecutable` if you only want the `.ps1` output.
-
-Windows users who prefer sticking to Command Prompt can double-click `Run-Merger.bat` to launch the updater with a guided flow.
+By default the script grabs the latest files from the `main` branch of
+`KOALAaufPILLEN/KOALAOptimizerV3`, refreshes the local copies, and writes a merged
+`KOALAOptimizerV3-full.ps1` alongside the split modules. Use `-Branch` or `-Output`
+parameters to override the defaults, or `-SkipDownload` to merge already-downloaded
+files.
