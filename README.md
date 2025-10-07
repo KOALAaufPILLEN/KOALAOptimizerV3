@@ -12,10 +12,12 @@ The bootstrap script unblocks the local files, relaxes the execution policy for 
 
 ## Updating or rebuilding a single file
 
-Use `merger-update.ps1` to pull the latest split modules from GitHub and rebuild the single-file version of the optimizer:
+Use `merger-update.ps1` to pull the latest split modules from GitHub and rebuild both the single-file script **and** a ready-to-run executable:
 
 ```powershell
 pwsh ./merger-update.ps1
 ```
 
-By default the script downloads the `main` branch of `KOALAaufPILLEN/KOALAOptimizerV3`, refreshes the local modules, and writes the merged `KOALAOptimizerV3-full.ps1` alongside them. Override the source branch or output path with the optional parameters, or pass `-SkipDownload` to merge the already-downloaded files.
+By default the script downloads the `main` branch of `KOALAaufPILLEN/KOALAOptimizerV3`, refreshes the local modules, and writes the merged `KOALAOptimizerV3-full.ps1` alongside a compiled `KOALAOptimizerV3-full.exe`. Override the source branch or output path with the optional parameters, pass `-SkipDownload` to merge the already-downloaded files, or `-SkipExecutable` if you only want the `.ps1` output.
+
+Windows users who prefer sticking to Command Prompt can double-click `Run-Merger.bat` to launch the updater with a guided flow.
