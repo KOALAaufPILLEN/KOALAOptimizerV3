@@ -55,9 +55,15 @@ $defaultTheme = [ordered]@{
 }
 
 $existingTheme = $null
-$themeVariable = Get-Variable -Name theme -Scope Script -ErrorAction SilentlyContinue
-if ($themeVariable) {
-    $existingTheme = $themeVariable.Value
+try {
+    if (-not (Test-Path 'variable:script:theme')) {
+        Set-Variable -Scope Script -Name theme -Value $null -Force
+    }
+
+    $existingTheme = Get-Variable -Name theme -Scope Script -ValueOnly -ErrorAction Stop
+}
+catch {
+    $existingTheme = $null
 }
 
 if (-not ($existingTheme -is [System.Collections.IDictionary])) {
@@ -77,6 +83,8 @@ foreach ($key in $defaultTheme.Keys) {
 
     $theme[$key] = $value
 }
+
+$script:theme = $theme
 
 $resourceToThemeMap = @{
     AppBackground      = 'Background'
