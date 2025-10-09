@@ -1,5 +1,24 @@
 Set-StrictMode -Version Latest
 
+$scriptDir = $null
+try {
+    if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
+        $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
+    }
+}
+catch {
+    # ignored – fallback logic below will handle resolution
+}
+
+if (-not $scriptDir) {
+    try {
+        $scriptDir = [System.IO.Path]::GetDirectoryName([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
+    }
+    catch {
+        $scriptDir = (Get-Location).Path
+    }
+}
+
 # Ensure that the WPF assemblies are loaded even when the script is executed on a
 # fresh host that has not run helpers.ps1 yet.  The calls are wrapped in a
 # try/catch block to provide a friendly error message instead of a cryptic
@@ -20,19 +39,44 @@ foreach ($assembly in $wpfAssemblies) {
 # Define a compact color palette that mirrors the soft neon purple theme used by
 # the legacy UI.  The values are injected into the XAML resources so that we can
 # reuse them when updating button states from code.
-$theme = [ordered]@{
-    Background            = '#0F0B1E'
-    Sidebar               = '#1C1733'
-    Accent                = '#8F6FFF'
-    AccentLight           = '#B9A7FF'
-    Hover                 = '#2A214F'
-    Selected              = '#403270'
-    Header                = '#1D1834'
-    Card                  = '#221C3F'
-    TextPrimary           = '#FFFFFF'
-    TextSecondary         = '#B8B5D1'
-    Success               = '#22C55E'
-    Warning               = '#F59E0B'
+$defaultTheme = [ordered]@{
+    Background    = '#0F0B1E'
+    Sidebar       = '#1C1733'
+    Accent        = '#8F6FFF'
+    AccentLight   = '#B9A7FF'
+    Hover         = '#2A214F'
+    Selected      = '#403270'
+    Header        = '#1D1834'
+    Card          = '#221C3F'
+    TextPrimary   = '#FFFFFF'
+    TextSecondary = '#B8B5D1'
+    Success       = '#22C55E'
+    Warning       = '#F59E0B'
+}
+
+if (-not ($theme -is [System.Collections.IDictionary])) {
+    $theme = [ordered]@{}
+}
+
+foreach ($key in $defaultTheme.Keys) {
+    if (-not $theme[$key]) {
+        $theme[$key] = $defaultTheme[$key]
+    }
+}
+
+$resourceToThemeMap = @{
+    AppBackground      = 'Background'
+    SidebarBackground  = 'Sidebar'
+    AccentBrush        = 'Accent'
+    AccentLightBrush   = 'AccentLight'
+    HoverBrush         = 'Hover'
+    SelectedBrush      = 'Selected'
+    HeaderBrush        = 'Header'
+    CardBrush          = 'Card'
+    TextPrimaryBrush   = 'TextPrimary'
+    TextSecondaryBrush = 'TextSecondary'
+    SuccessBrush       = 'Success'
+    WarningBrush       = 'Warning'
 }
 
 # XAML definition for the window.  It intentionally keeps the structure simple:
@@ -47,18 +91,18 @@ $xaml = @"
         Background="{DynamicResource AppBackground}"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
-        <SolidColorBrush x:Key="AppBackground" Color="#${($theme.Background.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="SidebarBackground" Color="#${($theme.Sidebar.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#${($theme.Accent.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="AccentLightBrush" Color="#${($theme.AccentLight.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="HoverBrush" Color="#${($theme.Hover.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="SelectedBrush" Color="#${($theme.Selected.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="HeaderBrush" Color="#${($theme.Header.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="CardBrush" Color="#${($theme.Card.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#${($theme.TextPrimary.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#${($theme.TextSecondary.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="SuccessBrush" Color="#${($theme.Success.TrimStart('#'))}" />
-        <SolidColorBrush x:Key="WarningBrush" Color="#${($theme.Warning.TrimStart('#'))}" />
+        <SolidColorBrush x:Key="AppBackground" Color="$($theme.Background)" />
+        <SolidColorBrush x:Key="SidebarBackground" Color="$($theme.Sidebar)" />
+        <SolidColorBrush x:Key="AccentBrush" Color="$($theme.Accent)" />
+        <SolidColorBrush x:Key="AccentLightBrush" Color="$($theme.AccentLight)" />
+        <SolidColorBrush x:Key="HoverBrush" Color="$($theme.Hover)" />
+        <SolidColorBrush x:Key="SelectedBrush" Color="$($theme.Selected)" />
+        <SolidColorBrush x:Key="HeaderBrush" Color="$($theme.Header)" />
+        <SolidColorBrush x:Key="CardBrush" Color="$($theme.Card)" />
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="$($theme.TextPrimary)" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="$($theme.TextSecondary)" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="$($theme.Success)" />
+        <SolidColorBrush x:Key="WarningBrush" Color="$($theme.Warning)" />
 
         <Style x:Key="NavButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
@@ -282,41 +326,113 @@ $xaml = @"
 </Window>
 "@
 
+function Show-CriticalError {
+    param([string]$Message)
+
+    try {
+        [System.Windows.MessageBox]::Show(
+            $Message,
+            'KOALA Optimizer',
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error
+        ) | Out-Null
+    }
+    catch {
+        Write-Error $Message
+    }
+}
+
 # Parse XAML into a WPF window instance.
-[xml]$xamlXml = $xaml
-$reader = New-Object System.Xml.XmlNodeReader $xamlXml
-$window = [Windows.Markup.XamlReader]::Load($reader)
+if (-not $xaml) {
+    Show-CriticalError 'The GUI markup could not be loaded. The interface cannot be rendered.'
+    return
+}
+
+$xamlXml = $null
+try {
+    [xml]$xamlXml = $xaml
+}
+catch {
+    Show-CriticalError "The GUI markup is invalid XML: $($_.Exception.Message)"
+    return
+}
+
+$reader = $null
+$window = $null
+try {
+    $reader = New-Object System.Xml.XmlNodeReader $xamlXml
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+}
+catch {
+    Show-CriticalError "Unable to construct the KOALA Optimizer window: $($_.Exception.Message)"
+    return
+}
+finally {
+    if ($reader) {
+        $reader.Close()
+    }
+}
+
+if (-not $window) {
+    Show-CriticalError 'The KOALA Optimizer window failed to initialize.'
+    return
+}
 
 # Convenience accessor for theme brushes defined in the resource dictionary.
 function Get-Brush {
     param([string]$Key)
-    return [System.Windows.Media.Brush]$window.Resources[$Key]
+    if ($window -and $window.Resources -and $window.Resources.Contains($Key)) {
+        return [System.Windows.Media.Brush]$window.Resources[$Key]
+    }
+
+    if ($resourceToThemeMap.ContainsKey($Key)) {
+        $themeKey = $resourceToThemeMap[$Key]
+        if ($theme[$themeKey]) {
+            try {
+                $color = [System.Windows.Media.ColorConverter]::ConvertFromString($theme[$themeKey])
+                if ($color) {
+                    return [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]$color)
+                }
+            }
+            catch {
+                # fall through to default brush
+            }
+        }
+    }
+
+    return [System.Windows.Media.Brushes]::Transparent
 }
 
-$navButtons = @(
-    $window.FindName('NavDashboard'),
-    $window.FindName('NavQuick'),
-    $window.FindName('NavAdvanced'),
-    $window.FindName('NavGames'),
-    $window.FindName('NavOptions'),
-    $window.FindName('NavBackup'),
-    $window.FindName('NavLog')
-) | Where-Object { $_ -ne $null }
-
-$panels = @{
-    Dashboard = $window.FindName('DashboardPanel')
-    Quick      = $window.FindName('QuickPanel')
-    Advanced   = $window.FindName('AdvancedPanel')
-    Games      = $window.FindName('GamesPanel')
-    Options    = $window.FindName('OptionsPanel')
-    Backup     = $window.FindName('BackupPanel')
-    Log        = $window.FindName('LogPanel')
+$navButtons = @()
+if ($window) {
+    $navButtons = @(
+        $window.FindName('NavDashboard'),
+        $window.FindName('NavQuick'),
+        $window.FindName('NavAdvanced'),
+        $window.FindName('NavGames'),
+        $window.FindName('NavOptions'),
+        $window.FindName('NavBackup'),
+        $window.FindName('NavLog')
+    ) | Where-Object { $_ -ne $null }
 }
 
-$headerTitle    = $window.FindName('HeaderTitle')
-$headerSubtitle = $window.FindName('HeaderSubtitle')
-$adminStatus    = $window.FindName('AdminStatus')
-$logBox         = $window.FindName('LogTextBox')
+$panels = @{}
+if ($window) {
+    $panels = @{
+        Dashboard = $window.FindName('DashboardPanel')
+        Quick      = $window.FindName('QuickPanel')
+        Advanced   = $window.FindName('AdvancedPanel')
+        Games      = $window.FindName('GamesPanel')
+        Options    = $window.FindName('OptionsPanel')
+        Backup     = $window.FindName('BackupPanel')
+        Log        = $window.FindName('LogPanel')
+    }
+}
+
+$headerTitle    = if ($window) { $window.FindName('HeaderTitle') }
+$headerSubtitle = if ($window) { $window.FindName('HeaderSubtitle') }
+$adminStatus    = if ($window) { $window.FindName('AdminStatus') }
+$logBox         = if ($window) { $window.FindName('LogTextBox') }
 
 $panelMetadata = @{
     Dashboard = @{ Title = 'Dashboard'; Subtitle = 'Monitor system health and launch optimizations.' }
@@ -337,11 +453,22 @@ function Write-AppLog {
     $timestamp = (Get-Date).ToString('HH:mm:ss')
     $entry = "[$timestamp] [$Level] $Message"
 
-    if ($logBox) {
-        $window.Dispatcher.Invoke([action]{
-            $logBox.AppendText($entry + [Environment]::NewLine)
-            $logBox.ScrollToEnd()
-        })
+    if ($window -and $logBox) {
+        try {
+            if ($window.Dispatcher.CheckAccess()) {
+                $logBox.AppendText($entry + [Environment]::NewLine)
+                $logBox.ScrollToEnd()
+            }
+            else {
+                $window.Dispatcher.Invoke([action]{
+                    $logBox.AppendText($entry + [Environment]::NewLine)
+                    $logBox.ScrollToEnd()
+                })
+            }
+        }
+        catch {
+            Write-Host $entry
+        }
     }
     else {
         Write-Host $entry
@@ -351,8 +478,11 @@ function Write-AppLog {
 function Select-NavigationButton {
     param([string]$PanelKey)
 
+    if (-not $navButtons -or $navButtons.Count -eq 0) {
+        return
+    }
+
     $selectedBrush = Get-Brush 'SelectedBrush'
-    $accentBrush   = Get-Brush 'AccentBrush'
     $textPrimary   = Get-Brush 'TextPrimaryBrush'
     $textSecondary = Get-Brush 'TextSecondaryBrush'
 
@@ -372,22 +502,24 @@ function Select-NavigationButton {
 function Show-Panel {
     param([string]$PanelKey)
 
-    if (-not $panels.ContainsKey($PanelKey)) {
+    if (-not $panels -or -not $panels.ContainsKey($PanelKey)) {
         Write-AppLog "Panel '$PanelKey' not found." 'Warning'
         return
     }
 
-    foreach ($panel in $panels.GetEnumerator()) {
-        if ($panel.Value) {
-            $panel.Value.Visibility = if ($panel.Key -eq $PanelKey) { 'Visible' } else { 'Collapsed' }
+    if ($panels.Count -gt 0) {
+        foreach ($panel in $panels.GetEnumerator()) {
+            if ($panel.Value) {
+                $panel.Value.Visibility = if ($panel.Key -eq $PanelKey) { 'Visible' } else { 'Collapsed' }
+            }
         }
     }
 
     Select-NavigationButton -PanelKey $PanelKey
 
     if ($panelMetadata.ContainsKey($PanelKey)) {
-        $headerTitle.Text = $panelMetadata[$PanelKey].Title
-        $headerSubtitle.Text = $panelMetadata[$PanelKey].Subtitle
+        if ($headerTitle) { $headerTitle.Text = $panelMetadata[$PanelKey].Title }
+        if ($headerSubtitle) { $headerSubtitle.Text = $panelMetadata[$PanelKey].Subtitle }
     }
 
     Write-AppLog "Switched to $PanelKey panel." 'Info'
@@ -667,10 +799,15 @@ $actionMap = @{
     }
     DashboardUpdateButton  = {
         Invoke-PanelAction 'Update check' {
-            $updater = Join-Path -Path (Split-Path $PSCommandPath) -ChildPath 'merger-update.ps1'
+            $updater = if ($scriptDir) { Join-Path -Path $scriptDir -ChildPath 'merger-update.ps1' } else { 'merger-update.ps1' }
             if (Test-Path $updater) {
-                Start-Process -FilePath "powershell" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","$updater" | Out-Null
-                Write-AppLog "Updater launched." 'Info'
+                try {
+                    Start-Process -FilePath "powershell" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","$updater" | Out-Null
+                    Write-AppLog "Updater launched." 'Info'
+                }
+                catch {
+                    Write-AppLog "Failed to launch updater: $($_.Exception.Message)" 'Error'
+                }
             }
             else {
                 Write-AppLog "Updater script not found." 'Warning'
@@ -721,20 +858,40 @@ $actionMap = @{
     }
     OptionsDarkThemeButton = {
         Invoke-PanelAction 'Apply dark theme' {
-            $window.Resources['AppBackground'].Color   = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Background)
-            $window.Resources['HeaderBrush'].Color      = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Header)
-            $window.Resources['SidebarBackground'].Color = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Sidebar)
-            $window.Resources['CardBrush'].Color        = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Card)
-            $window.Resources['AccentBrush'].Color      = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Accent)
-            $window.Resources['HoverBrush'].Color       = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Hover)
-            Write-AppLog "Dark theme colors restored." 'Info'
+            if (-not ($window -and $window.Resources)) {
+                Write-AppLog 'UI resources are not available to update.' 'Warning'
+                return
+            }
+
+            try {
+                $window.Resources['AppBackground'].Color    = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Background)
+                $window.Resources['HeaderBrush'].Color      = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Header)
+                $window.Resources['SidebarBackground'].Color = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Sidebar)
+                $window.Resources['CardBrush'].Color        = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Card)
+                $window.Resources['AccentBrush'].Color      = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Accent)
+                $window.Resources['HoverBrush'].Color       = [System.Windows.Media.ColorConverter]::ConvertFromString($theme.Hover)
+                Write-AppLog "Dark theme colors restored." 'Info'
+            }
+            catch {
+                Write-AppLog "Failed to apply dark theme colors: $($_.Exception.Message)" 'Error'
+            }
         }
     }
     OptionsVividThemeButton = {
         Invoke-PanelAction 'Apply vivid theme' {
-            $window.Resources['AccentBrush'].Color = [System.Windows.Media.ColorConverter]::ConvertFromString('#FF6BFF')
-            $window.Resources['HoverBrush'].Color  = [System.Windows.Media.ColorConverter]::ConvertFromString('#6B3FA0')
-            Write-AppLog "Vivid theme applied." 'Info'
+            if (-not ($window -and $window.Resources)) {
+                Write-AppLog 'UI resources are not available to update.' 'Warning'
+                return
+            }
+
+            try {
+                $window.Resources['AccentBrush'].Color = [System.Windows.Media.ColorConverter]::ConvertFromString('#FF6BFF')
+                $window.Resources['HoverBrush'].Color  = [System.Windows.Media.ColorConverter]::ConvertFromString('#6B3FA0')
+                Write-AppLog "Vivid theme applied." 'Info'
+            }
+            catch {
+                Write-AppLog "Failed to apply vivid theme colors: $($_.Exception.Message)" 'Error'
+            }
         }
     }
     BackupCreateButton     = {
@@ -767,17 +924,31 @@ $actionMap = @{
     }
 }
 
-foreach ($entry in $actionMap.GetEnumerator()) {
-    $control = $window.FindName($entry.Key)
-    if ($control -and $control -is [System.Windows.Controls.Button]) {
-        $control.Add_Click($entry.Value)
+if ($window) {
+    foreach ($entry in $actionMap.GetEnumerator()) {
+        $control = $window.FindName($entry.Key)
+        if ($control -and $control -is [System.Windows.Controls.Button]) {
+            $null = $control.Add_Click($entry.Value)
+        }
     }
-}
 
-foreach ($button in $navButtons) {
-    if (-not $button) { continue }
-    $panelKey = [string]$button.Tag
-    $button.Add_Click({ param($sender,$args) Show-Panel -PanelKey $panelKey })
+    foreach ($button in $navButtons) {
+        if (-not $button) { continue }
+        $null = $button.Add_Click({
+            param($sender,$args)
+            $targetKey = $null
+            if ($sender -and $sender.Tag) {
+                $targetKey = [string]$sender.Tag
+            }
+            elseif ($args -and $args.Source -and $args.Source.Tag) {
+                $targetKey = [string]$args.Source.Tag
+            }
+
+            if ($targetKey) {
+                Show-Panel -PanelKey $targetKey
+            }
+        })
+    }
 }
 
 Update-AdminStatus
@@ -785,6 +956,8 @@ Show-Panel -PanelKey 'Dashboard'
 
 function Initialize-Application {
     param()
+
+    if (-not $window) { return }
 
     $application = [System.Windows.Application]::Current
     if (-not $application) {
@@ -796,8 +969,6 @@ function Initialize-Application {
     $application.Run($window) | Out-Null
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
-    if ($PSCommandPath -eq $MyInvocation.MyCommand.Path) {
-        Initialize-Application
-    }
+if ($MyInvocation.InvocationName -ne '.' -and $window) {
+    Initialize-Application
 }
