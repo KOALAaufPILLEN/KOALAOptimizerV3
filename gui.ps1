@@ -1,5 +1,89 @@
 Set-StrictMode -Version Latest
 
+$requiredApartment = [System.Threading.ApartmentState]::STA
+$currentThread = [System.Threading.Thread]::CurrentThread
+if ($currentThread.GetApartmentState() -ne $requiredApartment) {
+    $staSet = $false
+    try {
+        $staSet = $currentThread.TrySetApartmentState($requiredApartment)
+    }
+    catch {
+        $staSet = $false
+    }
+
+    if (-not $staSet) {
+        if ($env:KOALA_GUI_STA_REDIRECT -ne '1') {
+            $launcher = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $scriptPath = $null
+            try {
+                if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
+                    $scriptPath = $MyInvocation.MyCommand.Path
+                }
+            }
+            catch {
+                $scriptPath = $null
+            }
+
+            if ($launcher) {
+                $psi = [System.Diagnostics.ProcessStartInfo]::new()
+                $psi.FileName = $launcher
+                $psi.UseShellExecute = $false
+                $psi.EnvironmentVariables['KOALA_GUI_STA_REDIRECT'] = '1'
+
+                $argumentBuilder = New-Object System.Text.StringBuilder
+                if ($launcher -match 'pwsh|powershell') {
+                    $null = $argumentBuilder.Append('-NoLogo -NoProfile -ExecutionPolicy Bypass')
+                    if ($scriptPath) {
+                        $escapedPath = '"' + ($scriptPath -replace '"', '""') + '"'
+                        $null = $argumentBuilder.Append(" -File $escapedPath")
+                    }
+                }
+                elseif ($scriptPath) {
+                    $psi.FileName = $scriptPath
+                }
+
+                if ($args -and $args.Count -gt 0) {
+                    $escapedArgs = foreach ($value in $args) {
+                        '"' + ([string]$value -replace '"', '""') + '"'
+                    }
+                    $joinedArgs = [string]::Join(' ', $escapedArgs)
+
+                    if ($argumentBuilder.Length -gt 0) {
+                        $null = $argumentBuilder.Append(' ')
+                    }
+                    $null = $argumentBuilder.Append($joinedArgs)
+                }
+
+                if ($argumentBuilder.Length -gt 0) {
+                    $psi.Arguments = $argumentBuilder.ToString()
+                }
+
+                try {
+                    $process = [System.Diagnostics.Process]::Start($psi)
+                    if ($process) {
+                        $process.WaitForExit()
+                        return
+                    }
+                }
+                catch {
+                    # fall through to error reporting below
+                }
+            }
+
+            Write-Error 'Unable to enforce STA thread requirement for the KOALA Optimizer GUI.'
+            return
+        }
+        else {
+            Write-Error 'Unable to initialize KOALA Optimizer GUI in STA mode.'
+            return
+        }
+    }
+}
+
+if ($env:KOALA_GUI_STA_REDIRECT -eq '1') {
+    Remove-Item Env:KOALA_GUI_STA_REDIRECT -ErrorAction SilentlyContinue
+}
+
 $scriptDir = $null
 try {
     if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
@@ -515,7 +599,7 @@ function Select-NavigationButton {
             $button.Foreground = $textPrimary
         }
         else {
-            $button.Background = [System.Windows.Media.Brush]::Transparent
+            $button.Background = [System.Windows.Media.Brushes]::Transparent
             $button.Foreground = $textSecondary
         }
     }
@@ -776,6 +860,7 @@ function Invoke-GameOptimization {
         Write-AppLog 'No detected games to optimize.' 'Warning'
         return $false
     }
+}
 
     $success = $false
     foreach ($game in $games) {
@@ -783,6 +868,7 @@ function Invoke-GameOptimization {
         if ($process -is [System.Array]) {
             $process = if ($process.Length -gt 0) { $process[0] } else { $null }
         }
+    }
 
         if (-not $game.GameKey) {
             Write-AppLog "Skipping optimization for '${($game.DisplayName)}' because no profile key is available." 'Warning'
