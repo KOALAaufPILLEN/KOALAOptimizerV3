@@ -504,6 +504,8 @@ function Get-Brush {
                 # fall through to default brush
             }
         }
+        Write-AppLog "$description completed." 'Success'
+        return $true
     }
 
     return [System.Windows.Media.Brushes]::Transparent
