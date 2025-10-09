@@ -1,5 +1,13 @@
 Set-StrictMode -Version Latest
 
+$script:koalaRunspace = $null
+try {
+    $script:koalaRunspace = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
+}
+catch {
+    $script:koalaRunspace = $null
+}
+
 $requiredApartment = [System.Threading.ApartmentState]::STA
 $currentThread = [System.Threading.Thread]::CurrentThread
 if ($currentThread.GetApartmentState() -ne $requiredApartment) {
@@ -504,8 +512,6 @@ function Get-Brush {
                 # fall through to default brush
             }
         }
-        Write-AppLog "$description completed." 'Success'
-        return $true
     }
 
     return [System.Windows.Media.Brushes]::Transparent
@@ -1093,7 +1099,7 @@ function Initialize-Application {
 
     if (-not $window) { return }
 
-    $runAction = {
+    $startWindow = {
         param($wnd)
 
         if (-not $wnd) { return }
@@ -1106,41 +1112,58 @@ function Initialize-Application {
             $existingApp = $null
         }
 
-        if ($existingApp -and $existingApp.Dispatcher) {
-            $invokeAction = {
-                $innerWindow = $wnd
+        $invokeWindow = {
+            param($innerWindow)
 
+            if (-not $innerWindow) { return }
+
+            $app = $null
+            try {
                 $app = [System.Windows.Application]::Current
-                if (-not $app -or -not $innerWindow) { return }
+            }
+            catch {
+                $app = $null
+            }
 
-                try {
-                    if (-not $app.MainWindow) {
-                        $app.MainWindow = $innerWindow
-                    }
-                }
-                catch {
-                    $message = "Unable to register the KOALA Optimizer main window.`n$_"
-                    [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
-                    return
-                }
+            if (-not $app) { return }
 
-                try {
-                    if (-not $innerWindow.IsVisible) {
-                        $innerWindow.Show()
-                    }
-                    $null = $innerWindow.Activate()
+            try {
+                if (-not $app.MainWindow) {
+                    $app.MainWindow = $innerWindow
                 }
-                catch {
-                    $message = "Unable to display the KOALA Optimizer interface.`n$_"
-                    [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
-                }
-            }.GetNewClosure()
+            }
+            catch {
+                $message = "Unable to register the KOALA Optimizer main window.`n$_"
+                [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+                return
+            }
 
+            try {
+                if (-not $innerWindow.IsVisible) {
+                    $innerWindow.Show()
+                }
+                $null = $innerWindow.Activate()
+            }
+            catch {
+                $message = "Unable to display the KOALA Optimizer interface.`n$_"
+                [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+            }
+        }.GetNewClosure()
+
+        if ($existingApp -and $existingApp.Dispatcher) {
             if ($existingApp.Dispatcher.CheckAccess()) {
-                & $invokeAction
+                & $invokeWindow $wnd
             }
             else {
-                $existingApp.Dispatcher.Invoke([System.Action]$invokeAction)
+                $capturedRunspace = $script:koalaRunspace
+                $capturedWindow = $wnd
+                $dispatchAction = {
+                    if ($capturedRunspace) {
+                        [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $capturedRunspace
+                    }
+                    & $invokeWindow $capturedWindow
+                }.GetNewClosure()
+                $existingApp.Dispatcher.Invoke([System.Action]$dispatchAction)
             }
 
             return
@@ -1179,14 +1202,22 @@ function Initialize-Application {
             $message = "Unable to start the KOALA Optimizer interface.`n$_"
             [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
         }
-    }
+    }.GetNewClosure()
 
     $dispatcher = $window.Dispatcher
     if ($dispatcher -and -not $dispatcher.CheckAccess()) {
-        $dispatcher.Invoke($runAction, $window)
+        $capturedRunspace = $script:koalaRunspace
+        $capturedWindow = $window
+        $dispatchStarter = {
+            if ($capturedRunspace) {
+                [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $capturedRunspace
+            }
+            & $startWindow $capturedWindow
+        }.GetNewClosure()
+        $dispatcher.Invoke([System.Action]$dispatchStarter)
     }
     else {
-        & $runAction $window
+        & $startWindow $window
     }
 }
 
