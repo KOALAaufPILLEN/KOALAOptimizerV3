@@ -504,6 +504,11 @@ function Get-Brush {
                 # fall through to default brush
             }
         }
+        else {
+            & $command
+        }
+        Write-AppLog "$description completed." 'Success'
+        return $true
     }
 
     return [System.Windows.Media.Brushes]::Transparent
@@ -860,7 +865,6 @@ function Invoke-GameOptimization {
         Write-AppLog 'No detected games to optimize.' 'Warning'
         return $false
     }
-}
 
     $success = $false
     foreach ($game in $games) {
@@ -868,14 +872,17 @@ function Invoke-GameOptimization {
         if ($process -is [System.Array]) {
             $process = if ($process.Length -gt 0) { $process[0] } else { $null }
         }
-    }
 
         if (-not $game.GameKey) {
             Write-AppLog "Skipping optimization for '${($game.DisplayName)}' because no profile key is available." 'Warning'
             continue
         }
 
-        if (Invoke-IfAvailable 'Apply-GameOptimizations' "Optimize $($game.DisplayName)" @{ GameKey = $game.GameKey; Process = $process }) {
+        $gameOptimizationArgs = @{
+            GameKey = $game.GameKey
+            Process = $process
+        }
+        if (Invoke-IfAvailable 'Apply-GameOptimizations' "Optimize $($game.DisplayName)" $gameOptimizationArgs) {
             $success = $true
         }
     }
