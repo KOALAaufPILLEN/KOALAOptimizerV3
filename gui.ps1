@@ -1098,18 +1098,73 @@ function Initialize-Application {
 
         if (-not $wnd) { return }
 
-        $app = [System.Windows.Application]::Current
-        if ($app -and $app.Dispatcher -and -not $app.Dispatcher.CheckAccess()) {
-            $app = $null
+        $existingApp = $null
+        try {
+            $existingApp = [System.Windows.Application]::Current
+        }
+        catch {
+            $existingApp = $null
         }
 
-        if (-not $app) {
-            $app = [System.Windows.Application]::new()
-            $app.ShutdownMode = [System.Windows.ShutdownMode]::OnMainWindowClose
+        if ($existingApp -and $existingApp.Dispatcher) {
+            $invokeAction = {
+                param($innerWindow)
+
+                $app = [System.Windows.Application]::Current
+                if (-not $app) { return }
+
+                try {
+                    if (-not $app.MainWindow) {
+                        $app.MainWindow = $innerWindow
+                    }
+                }
+                catch {
+                    $message = "Unable to register the KOALA Optimizer main window.`n$_"
+                    [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+                    return
+                }
+
+                try {
+                    if (-not $innerWindow.IsVisible) {
+                        $innerWindow.Show()
+                    }
+                    $null = $innerWindow.Activate()
+                }
+                catch {
+                    $message = "Unable to display the KOALA Optimizer interface.`n$_"
+                    [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+                }
+            }
+
+            if ($existingApp.Dispatcher.CheckAccess()) {
+                & $invokeAction $wnd
+            }
+            else {
+                $existingApp.Dispatcher.Invoke($invokeAction, $wnd)
+            }
+
+            return
+        }
+
+        $newApp = $null
+        try {
+            $newApp = New-Object System.Windows.Application
+        }
+        catch {
+            $message = "Unable to create the KOALA Optimizer application host.`n$_"
+            [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+            return
         }
 
         try {
-            $app.MainWindow = $wnd
+            $newApp.ShutdownMode = [System.Windows.ShutdownMode]::OnMainWindowClose
+        }
+        catch {
+            # If the property cannot be set we still attempt to show the window.
+        }
+
+        try {
+            $newApp.MainWindow = $wnd
         }
         catch {
             $message = "Unable to set the KOALA Optimizer main window.`n$_"
@@ -1118,7 +1173,7 @@ function Initialize-Application {
         }
 
         try {
-            $null = $app.Run($wnd)
+            $null = $newApp.Run($wnd)
         }
         catch {
             $message = "Unable to start the KOALA Optimizer interface.`n$_"
