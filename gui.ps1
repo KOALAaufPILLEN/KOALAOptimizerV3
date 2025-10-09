@@ -1108,10 +1108,10 @@ function Initialize-Application {
 
         if ($existingApp -and $existingApp.Dispatcher) {
             $invokeAction = {
-                param($innerWindow)
+                $innerWindow = $wnd
 
                 $app = [System.Windows.Application]::Current
-                if (-not $app) { return }
+                if (-not $app -or -not $innerWindow) { return }
 
                 try {
                     if (-not $app.MainWindow) {
@@ -1134,13 +1134,13 @@ function Initialize-Application {
                     $message = "Unable to display the KOALA Optimizer interface.`n$_"
                     [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
                 }
-            }
+            }.GetNewClosure()
 
             if ($existingApp.Dispatcher.CheckAccess()) {
-                & $invokeAction $wnd
+                & $invokeAction
             }
             else {
-                $existingApp.Dispatcher.Invoke($invokeAction, $wnd)
+                $existingApp.Dispatcher.Invoke([System.Action]$invokeAction)
             }
 
             return
