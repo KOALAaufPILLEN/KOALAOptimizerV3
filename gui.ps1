@@ -537,10 +537,16 @@ if ($window) {
     }
 }
 
-$headerTitle    = if ($window) { $window.FindName('HeaderTitle') }
-$headerSubtitle = if ($window) { $window.FindName('HeaderSubtitle') }
-$adminStatus    = if ($window) { $window.FindName('AdminStatus') }
-$logBox         = if ($window) { $window.FindName('LogTextBox') }
+$headerTitle    = $null
+$headerSubtitle = $null
+$adminStatus    = $null
+$logBox         = $null
+if ($window) {
+    $headerTitle    = $window.FindName('HeaderTitle')
+    $headerSubtitle = $window.FindName('HeaderSubtitle')
+    $adminStatus    = $window.FindName('AdminStatus')
+    $logBox         = $window.FindName('LogTextBox')
+}
 
 $panelMetadata = @{
     Dashboard = @{ Title = 'Dashboard'; Subtitle = 'Monitor system health and launch optimizations.' }
@@ -618,7 +624,12 @@ function Show-Panel {
     if ($panels.Count -gt 0) {
         foreach ($panel in $panels.GetEnumerator()) {
             if ($panel.Value) {
-                $panel.Value.Visibility = if ($panel.Key -eq $PanelKey) { 'Visible' } else { 'Collapsed' }
+                if ($panel.Key -eq $PanelKey) {
+                    $panel.Value.Visibility = 'Visible'
+                }
+                else {
+                    $panel.Value.Visibility = 'Collapsed'
+                }
             }
         }
     }
@@ -640,7 +651,10 @@ function Invoke-IfAvailable {
         [hashtable]$Arguments
     )
 
-    $description = if ($Description) { $Description } else { $CommandName }
+    $description = $CommandName
+    if ($Description) {
+        $description = $Description
+    }
 
     $command = Get-Command -Name $CommandName -ErrorAction SilentlyContinue
     if (-not $command) {
@@ -867,7 +881,12 @@ function Invoke-GameOptimization {
     foreach ($game in $games) {
         $process = $game.Process
         if ($process -is [System.Array]) {
-            $process = if ($process.Length -gt 0) { $process[0] } else { $null }
+            if ($process.Length -gt 0) {
+                $process = $process[0]
+            }
+            else {
+                $process = $null
+            }
         }
 
         if (-not $game.GameKey) {
@@ -911,7 +930,10 @@ $actionMap = @{
     }
     DashboardUpdateButton  = {
         Invoke-PanelAction 'Update check' {
-            $updater = if ($scriptDir) { Join-Path -Path $scriptDir -ChildPath 'merger-update.ps1' } else { 'merger-update.ps1' }
+            $updater = 'merger-update.ps1'
+            if ($scriptDir) {
+                $updater = Join-Path -Path $scriptDir -ChildPath 'merger-update.ps1'
+            }
             if (Test-Path $updater) {
                 try {
                     Start-Process -FilePath "powershell" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","$updater" | Out-Null
@@ -1111,6 +1133,7 @@ function Initialize-Application {
     else {
         & $runAction $window
     }
+}
 
 if ($MyInvocation.InvocationName -ne '.' -and $window) {
     Initialize-Application
