@@ -504,9 +504,6 @@ function Get-Brush {
                 # fall through to default brush
             }
         }
-        else {
-            & $command
-        }
         Write-AppLog "$description completed." 'Success'
         return $true
     }
@@ -1074,15 +1071,46 @@ function Initialize-Application {
 
     if (-not $window) { return }
 
-    $application = [System.Windows.Application]::Current
-    if (-not $application) {
-        $application = [System.Windows.Application]::new()
-        $application.ShutdownMode = [System.Windows.ShutdownMode]::OnMainWindowClose
+    $runAction = {
+        param($wnd)
+
+        if (-not $wnd) { return }
+
+        $app = [System.Windows.Application]::Current
+        if ($app -and $app.Dispatcher -and -not $app.Dispatcher.CheckAccess()) {
+            $app = $null
+        }
+
+        if (-not $app) {
+            $app = [System.Windows.Application]::new()
+            $app.ShutdownMode = [System.Windows.ShutdownMode]::OnMainWindowClose
+        }
+
+        try {
+            $app.MainWindow = $wnd
+        }
+        catch {
+            $message = "Unable to set the KOALA Optimizer main window.`n$_"
+            [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+            return
+        }
+
+        try {
+            $null = $app.Run($wnd)
+        }
+        catch {
+            $message = "Unable to start the KOALA Optimizer interface.`n$_"
+            [System.Windows.MessageBox]::Show($message, 'KOALA Optimizer', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error) | Out-Null
+        }
     }
 
-    $application.MainWindow = $window
-    $application.Run($window) | Out-Null
-}
+    $dispatcher = $window.Dispatcher
+    if ($dispatcher -and -not $dispatcher.CheckAccess()) {
+        $dispatcher.Invoke($runAction, $window)
+    }
+    else {
+        & $runAction $window
+    }
 
 if ($MyInvocation.InvocationName -ne '.' -and $window) {
     Initialize-Application
