@@ -860,6 +860,7 @@ function Invoke-GameOptimization {
         Write-AppLog 'No detected games to optimize.' 'Warning'
         return $false
     }
+}
 
     $success = $false
     foreach ($game in $games) {
@@ -867,6 +868,7 @@ function Invoke-GameOptimization {
         if ($process -is [System.Array]) {
             $process = if ($process.Length -gt 0) { $process[0] } else { $null }
         }
+    }
 
         if (-not $game.GameKey) {
             Write-AppLog "Skipping optimization for '${($game.DisplayName)}' because no profile key is available." 'Warning'
