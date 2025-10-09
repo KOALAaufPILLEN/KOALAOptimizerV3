@@ -504,6 +504,8 @@ function Get-Brush {
                 # fall through to default brush
             }
         }
+        Write-AppLog "$description completed." 'Success'
+        return $true
     }
 
     return [System.Windows.Media.Brushes]::Transparent
@@ -1109,7 +1111,6 @@ function Initialize-Application {
     else {
         & $runAction $window
     }
-}
 
 if ($MyInvocation.InvocationName -ne '.' -and $window) {
     Initialize-Application
