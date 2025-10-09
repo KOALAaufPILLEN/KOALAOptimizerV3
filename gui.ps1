@@ -54,14 +54,28 @@ $defaultTheme = [ordered]@{
     Warning       = '#F59E0B'
 }
 
-if (-not ($theme -is [System.Collections.IDictionary])) {
-    $theme = [ordered]@{}
+$existingTheme = $null
+$themeVariable = Get-Variable -Name theme -Scope Script -ErrorAction SilentlyContinue
+if ($themeVariable) {
+    $existingTheme = $themeVariable.Value
 }
 
+if (-not ($existingTheme -is [System.Collections.IDictionary])) {
+    $existingTheme = @{}
+}
+
+$theme = [ordered]@{}
 foreach ($key in $defaultTheme.Keys) {
-    if (-not $theme[$key]) {
-        $theme[$key] = $defaultTheme[$key]
+    $value = $null
+    if ($existingTheme -and ($existingTheme.Keys -contains $key)) {
+        $value = $existingTheme[$key]
     }
+
+    if ([string]::IsNullOrWhiteSpace([string]$value)) {
+        $value = $defaultTheme[$key]
+    }
+
+    $theme[$key] = $value
 }
 
 $resourceToThemeMap = @{
