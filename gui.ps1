@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 $script:koalaRunspace = $null
 try {
@@ -843,6 +843,7 @@ function Invoke-QuickOptimization {
     Write-AppLog 'Quick optimization preset finished without triggering any backend routines.' 'Warning'
     return $false
 }
+
 
 function Invoke-GameLibraryScan {
     param(
