@@ -25,17 +25,12 @@ if not exist "%MERGER%" (
     exit /b 1
 )
 
+set "MERGER_URL=https://raw.githubusercontent.com/KOALAaufPILLEN/KOALAOptimizerV3/%MERGER_BRANCH%/merger-update.ps1"
+
+set "MERGER_REFRESH=^& { try { Invoke-WebRequest -Uri '%MERGER_URL%' -OutFile '%MERGER%' -UseBasicParsing; Write-Host 'merger-update.ps1 refreshed.' -ForegroundColor Green } catch { Write-Host ('WARNING: Could not refresh merger-update.ps1 - {0}' -f $_.Exception.Message) -ForegroundColor Yellow; exit 1 } }"
+
 echo Refreshing merger-update.ps1 from GitHub (branch %MERGER_BRANCH%)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$uri = 'https://raw.githubusercontent.com/KOALAaufPILLEN/KOALAOptimizerV3/%MERGER_BRANCH%/merger-update.ps1';" ^
-    "$destination = '%MERGER%';" ^
-    "try {" ^
-    "    Invoke-WebRequest -Uri $uri -OutFile $destination -UseBasicParsing" ^
-    "    Write-Host 'merger-update.ps1 refreshed.' -ForegroundColor Green" ^
-    "} catch {" ^
-    "    Write-Host ('WARNING: Could not refresh merger-update.ps1 - {0}' -f $_.Exception.Message) -ForegroundColor Yellow" ^
-    "    exit 1" ^
-    "}"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "%MERGER_REFRESH%"
 if errorlevel 1 (
     echo [WARNING] Continuing with local merger-update.ps1 copy.
 )
