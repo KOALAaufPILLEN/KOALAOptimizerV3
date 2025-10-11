@@ -109,13 +109,13 @@ $entryPoint = @(
     ''
 )
 
-$allLines = [System.Collections.Generic.List[string]]::new()
+$allLines = @()
 foreach ($line in $header) {
     $allLines.Add([string]$line)
 }
 
 foreach ($file in $filesToProcess) {
-    $allLines.Add("#region ${file}")
+    $allLines += "#region ${file}"
     $modulePath = Join-Path $scriptRoot $file
 
     if (-not (Test-Path $modulePath)) {
@@ -126,8 +126,8 @@ foreach ($file in $filesToProcess) {
     foreach ($line in [string[]]$moduleLines) {
         $allLines.Add([string]$line)
     }
-    $allLines.Add("#endregion ${file}")
-    $allLines.Add('')
+    $allLines += "#endregion ${file}"
+    $allLines += ''
 }
 
 foreach ($line in $entryPoint) {
