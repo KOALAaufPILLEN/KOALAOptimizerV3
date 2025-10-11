@@ -110,7 +110,7 @@ $entryPoint = @(
 )
 
 $allLines = [System.Collections.Generic.List[string]]::new()
-$allLines.AddRange($header)
+$allLines.AddRange([string[]]$header)
 
 foreach ($file in $filesToProcess) {
     $allLines.Add("#region ${file}")
@@ -121,13 +121,13 @@ foreach ($file in $filesToProcess) {
     }
 
     $moduleContent = Get-Content -Path $modulePath -Raw
-    $moduleLines = $moduleContent -split "`r?`n"
-    $allLines.AddRange($moduleLines)
+    $moduleLines = [System.Text.RegularExpressions.Regex]::Split($moduleContent, "`r?`n")
+    $allLines.AddRange([string[]]$moduleLines)
     $allLines.Add("#endregion ${file}")
     $allLines.Add('')
 }
 
-$allLines.AddRange($entryPoint)
+$allLines.AddRange([string[]]$entryPoint)
 
 $allLines | Set-Content -Path $mergedPath -Encoding UTF8
 

@@ -193,6 +193,7 @@ function Get-ThemeColors {
         Log "Theme '$ThemeName' nicht gefunden, verwende Optimizer Dark" 'Warning'
         return Normalize-ThemeColorTable $global:ThemeDefinitions['OptimizerDark']
     }
+}
 
 function Optimize-LogFile {
     param([int]$MaxSizeMB = 10)
@@ -216,78 +217,6 @@ function Optimize-LogFile {
         }
         # Silent failure for log optimization to prevent recursion
     }
-
-function Get-SystemPerformanceMetrics {
-    param([switch]$Detailed)
-
-    try {
-        $metrics = @{
-            CPU = 0
-            Memory = 0
-            Disk = 0
-            Network = 0
-        }
-
-        try {
-            $cpu = Get-WmiObject -Class Win32_Processor | Measure-Object -Property LoadPercentage -Average
-            if ($cpu -and $cpu.Average -ne $null) {
-                $metrics.CPU = [math]::Round($cpu.Average, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve CPU metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $totalMemory = (Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory
-            $availableMemory = (Get-WmiObject -Class Win32_OperatingSystem).AvailablePhysicalMemory
-
-            if ($totalMemory -and $availableMemory) {
-                $usedMemory = $totalMemory - $availableMemory
-                $metrics.Memory = [math]::Round(($usedMemory / $totalMemory) * 100, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve memory metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $diskUsage = Get-Counter -Counter "\PhysicalDisk(_Total)\% Disk Time" -ErrorAction Stop
-            if ($diskUsage -and $diskUsage.CounterSamples) {
-                $metrics.Disk = [math]::Round($diskUsage.CounterSamples.CookedValue, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve disk metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $networkUsage = Get-Counter -Counter "\Network Interface(*)\Bytes Total/sec" -ErrorAction Stop
-            if ($networkUsage -and $networkUsage.CounterSamples) {
-                $metrics.Network = [math]::Round((($networkUsage.CounterSamples | Measure-Object CookedValue -Average).Average) / 1KB, 2)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve network metrics: $($_.Exception.Message)"
-        }
-
-        if ($Detailed) {
-            $metrics.Timestamp = Get-Date
-            $metrics.Source = "WMI"
-        }
-
-        return $metrics
-    }
-    catch {
-        Write-Verbose "Falling back to default system performance metrics: $($_.Exception.Message)"
-        return @{
-            CPU = 0
-            Memory = 0
-            Disk = 0
-            Network = 0
-        }
-    }
-}
 
 function Ensure-NavigationVisibility {
     param([System.Windows.Controls.Panel]$NavigationPanel)
@@ -1669,504 +1598,558 @@ function Test-XamlNameUniqueness {
 }
 
 function Apply-FallbackThemeColors {
-    param($element, $colors)
+    param(
+        [System.Windows.DependencyObject]$Element,
+        [hashtable]$Colors
+    )
 
-    if (-not $element -or -not $colors) { return }
-
-        $elementType = $element.GetType().Name
-
-        switch ($elementType) {
-            "Window" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background
-
-            }
-            "Border" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-            }
-            "TextBlock" {
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-            }
-            "Label" {
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-            }
-            "Button" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Primary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value 'White'
-            }
-        }
-
-        if ($element.Children) {
-            foreach ($child in $element.Children) {
-                Apply-FallbackThemeColors -element $child -colors $colors
-            }
-        } elseif ($element.Content -and $element.Content -is [System.Windows.UIElement]) {
-            Apply-FallbackThemeColors -element $element.Content -colors $colors
-        } elseif ($element.Child) {
-            Apply-FallbackThemeColors -element $element.Child -colors $colors
-        # Ignore errors in fallback theming to avoid breaking the UI
-
-function Update-AllUIElementsRecursively {
-    param($element, $colors)
-
-    if (-not $element -or -not $colors) { return }
-
-        $elementType = $element.GetType().Name
-
-        switch ($elementType) {
-            "Window" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background
-                if ($element.BorderBrush) {
-                    Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-
-                }
-            }
-            "Border" {
-                $currentBg = if ($element.Background) { $element.Background.ToString() } else { $null }
-
-                if ($currentBg -match "#161D3F|#1B2345|#141830|#1A1F39|#141830|#14132B|#F8F9FA|#FFFFFF|#F0F2F5") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-
-                }
-                if ($currentBg -match "#0E101A|#36393F|#0E0E10") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background
-                }
-
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-            }
-            "GroupBox" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-
-                if ($element.Header -and $element.Header -is [System.String]) {
-                    $headerBlock = New-Object System.Windows.Controls.TextBlock
-                    $headerBlock.Text = $element.Header
-                    Set-BrushPropertySafe -Target $headerBlock -Property 'Foreground' -Value $colors.Text
-                    $headerBlock.FontWeight = "Bold"
-                    $element.Header = $headerBlock
-                } elseif ($element.Header -and $element.Header -is [System.Windows.Controls.TextBlock]) {
-                    Set-BrushPropertySafe -Target $element.Header -Property 'Foreground' -Value $colors.Text
-                }
-            }
-            "StackPanel" {
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                } elseif (-not $element.Background -or $element.Background.ToString() -eq "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background -AllowTransparentFallback
-                }
-            }
-            "Grid" {
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                } elseif (-not $element.Background -or $element.Background.ToString() -eq "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background -AllowTransparentFallback
-                }
-            }
-            "WrapPanel" {
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                } else {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background -AllowTransparentFallback
-                }
-            }
-            "DockPanel" {
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                } else {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background -AllowTransparentFallback
-                }
-            }
-            "TabItem" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-            }
-            "TabControl" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-            }
-            "Expander" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-
-                if ($element.Header -and $element.Header -is [System.Windows.Controls.TextBlock]) {
-                    Set-BrushPropertySafe -Target $element.Header -Property 'Foreground' -Value $colors.Text
-                }
-            }
-            "TextBlock" {
-                $currentForeground = if ($element.Foreground) { $element.Foreground.ToString() } else { $null }
-
-                if ($currentForeground -match "#8F6FFF|#B497FF|#5D5FEF|#8A77FF") {
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Accent
-                }
-                elseif ($currentForeground -match "#A9A5D9|#A6AACF|#B8B8B8|#777EA6888|#6C757D|#8B949E") {
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.TextSecondary
-
-                }
-                elseif ($currentForeground -match "White|#FFFFFF|Black|#000000|#212529|#1C1E21") {
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                }
-                elseif (-not $currentForeground) {
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                }
-            }
-            "Label" {
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                }
-            }
-            "TextBox" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-                Set-BrushPropertySafe -Target $element -Property 'SelectionBrush' -Value $colors.Primary
-            }
-            "ComboBox" {
-                $comboBackground = $colors.Secondary
-                $comboForeground = $colors.Text
-
-                if ($colors.ContainsKey('IsLight') -and $colors.IsLight) {
-                    $comboBackground = $colors.Background
-                    $comboForeground = $colors.Text
-                }
-
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $comboBackground
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $comboForeground
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-
-                    $element.FontSize = 12
-                    $element.FontWeight = 'Normal'
-
-                foreach ($item in $element.Items) {
-                    if ($item -is [System.Windows.Controls.ComboBoxItem]) {
-                        Set-BrushPropertySafe -Target $item -Property 'Background' -Value $comboBackground
-                        Set-BrushPropertySafe -Target $item -Property 'Foreground' -Value $comboForeground
-
-                            $item.Padding = "10,6"
-                            $item.MinHeight = 28
-                            $item.FontSize = 12
-                    }
-                }
-            }
-            "ListBox" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-            }
-            "ListView" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
-            }
-            "CheckBox" {
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                }
-            }
-            "RadioButton" {
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                if ($element.Background -and $element.Background.ToString() -ne "Transparent") {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                }
-            }
-            "Button" {
-                if ($element.Name -and -not ($element.Name -match "btnNav")) {
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Primary
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value 'White'
-                    Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Hover -AllowTransparentFallback
-                } elseif ($element.Name -match "btnNav") {
-                    if ($element.Tag -eq "Selected") {
-                        Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.SelectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.SelectedForeground -AllowTransparentFallback
-                    } else {
-                        Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.UnselectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.UnselectedForeground -AllowTransparentFallback
-                    }
-                    Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Primary
-                    Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value 'White'
+    if (-not $Element -or -not $Colors) {
+        return
     }
-                    Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Hover -AllowTransparentFallback
-            "ScrollViewer" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Background
 
-                    if ($element.Template) {
-        $scrollBars = @()
-        Find-AllControlsOfType -Parent $element -ControlType 'System.Windows.Controls.Primitives.ScrollBar' -Collection ([ref]$scrollBars)
-                        foreach ($scrollBar in $scrollBars) {
-                            Set-BrushPropertySafe -Target $scrollBar -Property 'Background' -Value $colors.Secondary
-                            Set-BrushPropertySafe -Target $scrollBar -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
+    try {
+        $elementType = $Element.GetType().Name
 
-                        }
-                    }
-                    # Continue if scrollbar theming fails
+        switch ($elementType) {
+            'Window' {
+                if ($Colors.ContainsKey('Background')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background
                 }
-            "ProgressBar" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Primary
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
             }
-            "Slider" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Primary
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
+            'Border' {
+                if ($Colors.ContainsKey('Secondary')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+                }
             }
-            "Menu" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
+            'TextBlock' {
+                if ($Colors.ContainsKey('Text')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+                }
             }
-            "MenuItem" {
-                Set-BrushPropertySafe -Target $element -Property 'Background' -Value $colors.Secondary
-                Set-BrushPropertySafe -Target $element -Property 'Foreground' -Value $colors.Text
-                Set-BrushPropertySafe -Target $element -Property 'BorderBrush' -Value $colors.Primary -AllowTransparentFallback
+            'Label' {
+                if ($Colors.ContainsKey('Text')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+                }
             }
-
-        }
-
-        $element.InvalidateVisual()
-        # Ignore refresh issues on individual elements
-
-        if ($element.Children) {
-            foreach ($child in $element.Children) {
-                Update-AllUIElementsRecursively -element $child -colors $colors
+            'Button' {
+                if ($Colors.ContainsKey('Primary')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Primary
+                }
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value 'White'
             }
         }
-        elseif ($element.Content -and $element.Content -is [System.Windows.UIElement]) {
-            Update-AllUIElementsRecursively -element $element.Content -colors $colors
-        }
-        elseif ($element.Child) {
-            Update-AllUIElementsRecursively -element $element.Child -colors $colors
-        }
 
-        # Continue on individual element failures
+        if ($Element -is [System.Windows.Controls.Panel]) {
+            foreach ($child in $Element.Children) {
+                Apply-FallbackThemeColors -Element $child -Colors $Colors
+            }
+        } elseif ($Element -is [System.Windows.Controls.ContentControl]) {
+            $content = $Element.Content
+            if ($content -is [System.Windows.DependencyObject]) {
+                Apply-FallbackThemeColors -Element $content -Colors $Colors
+            }
+        } elseif ($Element -is [System.Windows.Controls.Decorator]) {
+            if ($Element.Child -is [System.Windows.DependencyObject]) {
+                Apply-FallbackThemeColors -Element $Element.Child -Colors $Colors
+            }
+        }
+    } catch {
+        Write-Verbose ("Apply-FallbackThemeColors skipped: {0}" -f $_.Exception.Message)
+    }
 
+    # Ignore errors in fallback theming to avoid breaking the UI
 }
 
-  function Update-ButtonStyles {
-      param($Primary, $Hover)
+function Update-AllUIElementsRecursively {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.DependencyObject]$Element,
+        [Parameter(Mandatory)]
+        [hashtable]$Colors
+    )
 
-          $primaryBrush = $null
-          if ($Primary) {
-              $primaryBrush = New-SolidColorBrushSafe $Primary
+    if (-not $Element -or -not $Colors) {
+        return
+    }
 
-          }
+    $typeName = $Element.GetType().Name
 
-          $hoverBrush = $null
-          if ($Hover) {
-              $hoverBrush = New-SolidColorBrushSafe $Hover
-          }
+    switch ($typeName) {
+        'Window' {
+            if ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background
+            }
+            if ($Colors.ContainsKey('Primary') -and $Element.BorderBrush) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'Border' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            } elseif ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background -AllowTransparentFallback
+            }
 
-          $setResourceBrush = {
-              param($key, $brushCandidate, $colorValue)
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'GroupBox' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'StackPanel' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            } elseif ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background -AllowTransparentFallback
+            }
+        }
+        'Grid' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            } elseif ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background -AllowTransparentFallback
+            }
+        }
+        'WrapPanel' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            } elseif ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background -AllowTransparentFallback
+            }
+        }
+        'DockPanel' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            } elseif ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background -AllowTransparentFallback
+            }
+        }
+        'TabControl' {
+            if ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'TabItem' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'Expander' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Element.Header -is [System.Windows.Controls.TextBlock] -and $Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element.Header -Property 'Foreground' -Value $Colors.Text
+            }
+        }
+        'TextBlock' {
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+        }
+        'Label' {
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Element.Background -and $Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+        }
+        'TextBox' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'ComboBox' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'ListBox' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'ListView' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'CheckBox' {
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Element.Background -and $Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+        }
+        'RadioButton' {
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+            if ($Element.Background -and $Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+        }
+        'Button' {
+            if ($Element.Name -and $Element.Name -match 'btnNav') {
+                if ($Element.Tag -eq 'Selected') {
+                    if ($Colors.ContainsKey('SelectedBackground')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.SelectedBackground -AllowTransparentFallback
+                    } elseif ($Colors.ContainsKey('Primary')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Primary
+                    }
+                    if ($Colors.ContainsKey('SelectedForeground')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.SelectedForeground -AllowTransparentFallback
+                    } elseif ($Colors.ContainsKey('Text')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+                    }
+                } else {
+                    if ($Colors.ContainsKey('UnselectedBackground')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.UnselectedBackground -AllowTransparentFallback
+                    } elseif ($Colors.ContainsKey('Secondary')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+                    }
+                    if ($Colors.ContainsKey('UnselectedForeground')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.UnselectedForeground -AllowTransparentFallback
+                    } elseif ($Colors.ContainsKey('Text')) {
+                        Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+                    }
+                }
+                if ($Colors.ContainsKey('Primary')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+                }
+            } else {
+                if ($Colors.ContainsKey('Primary')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Primary
+                    Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+                }
+                if ($Colors.ContainsKey('Text')) {
+                    Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+                } else {
+                    Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value 'White'
+                }
+            }
+        }
+        'ProgressBar' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Primary
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'Slider' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Primary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Primary
+                Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $Colors.Primary -AllowTransparentFallback
+            }
+        }
+        'Menu' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+        }
+        'MenuItem' {
+            if ($Colors.ContainsKey('Secondary')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Secondary
+            }
+            if ($Colors.ContainsKey('Text')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Foreground' -Value $Colors.Text
+            }
+        }
+        'ScrollViewer' {
+            if ($Colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $Element -Property 'Background' -Value $Colors.Background
+            }
+        }
+    }
 
-              if (-not $form.Resources.Contains($key)) { return }
+    try {
+        $Element.InvalidateVisual()
+    } catch {
+        Write-Verbose ("Update-AllUIElementsRecursively: InvalidateVisual skipped: {0}" -f $_.Exception.Message)
+    }
 
-              $finalBrush = $null
+    if ($Element -is [System.Windows.Controls.Panel]) {
+        foreach ($child in $Element.Children) {
+            Update-AllUIElementsRecursively -Element $child -Colors $Colors
+        }
+        return
+    }
 
-              if ($brushCandidate) {
-                  $finalBrush = Convert-ToBrushResource -Value $brushCandidate
-                  if (-not $finalBrush) {
-                      $finalBrush = Convert-ToBrushResource -Value $brushCandidate -AllowTransparentFallback
-                  }
-              }
+    if ($Element -is [System.Windows.Controls.ContentControl]) {
+        $content = $Element.Content
+        if ($content -is [System.Windows.DependencyObject]) {
+            Update-AllUIElementsRecursively -Element $content -Colors $Colors
+        }
+        return
+    }
 
-              if (-not $finalBrush) {
-                  $colorString = Get-ColorStringFromValue $colorValue
-                  if (-not [string]::IsNullOrWhiteSpace($colorString)) {
-                      $finalBrush = Convert-ToBrushResource -Value $colorString
-                      if (-not $finalBrush) {
-                          $finalBrush = Convert-ToBrushResource -Value $colorString -AllowTransparentFallback
-                      }
-                  }
-              }
+    if ($Element -is [System.Windows.Controls.Decorator]) {
+        if ($Element.Child -is [System.Windows.DependencyObject]) {
+            Update-AllUIElementsRecursively -Element $Element.Child -Colors $Colors
+        }
+        return
+    }
 
-              if ($finalBrush -is [System.Windows.Media.Brush]) {
-                  $form.Resources[$key] = $finalBrush
-              } else {
-                  Write-Verbose "Skipping resource '$key' update - unable to convert value to a brush"
-              }
+    if ($Element -is [System.Windows.Media.Visual]) {
+        $childCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Element)
+        for ($i = 0; $i -lt $childCount; $i++) {
+            $child = [System.Windows.Media.VisualTreeHelper]::GetChild($Element, $i)
+            if ($child -is [System.Windows.DependencyObject]) {
+                Update-AllUIElementsRecursively -Element $child -Colors $Colors
+            }
+        }
+    }
+}
 
-              if ($finalBrush -is [System.Windows.Media.Brush]) {
-                  $form.Resources[$key] = $finalBrush
-              } else {
-                  Write-Verbose "Skipping resource '$key' update - unable to convert value to a brush"
-              }
+function Update-ButtonStyles {
+    [CmdletBinding()]
+    param(
+        [string]$Primary,
+        [string]$Hover,
+        [hashtable]$ThemeColors = $null
+    )
 
-              $safeBrush = New-SolidColorBrushSafe $colorString
-              if ($key -and $safeBrush) {
-                  return
-              }
+    if (-not $form) {
+        return
+    }
 
-              Write-Verbose "Skipping resource '$key' update - unable to convert '$colorString' to a brush"
+    try {
+        $buttons = @()
+        Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.Button' -Collection ([ref]$buttons)
 
-          # removed invalid call 'ButtonBackgroundBrush' $primaryBrush $Primary
-          # removed invalid call 'ButtonBorderBrush' $primaryBrush $Primary
+        foreach ($button in $buttons) {
+            if ($button.Style -and $form.Resources.Contains('ModernButton') -and $button.Style -eq $form.Resources['ModernButton']) {
+                if ($Primary) {
+                    Set-BrushPropertySafe -Target $button -Property 'Background' -Value $Primary
+                    Set-BrushPropertySafe -Target $button -Property 'BorderBrush' -Value $Primary -AllowTransparentFallback
+                }
+                if ($ThemeColors -and $ThemeColors.ContainsKey('Text')) {
+                    Set-BrushPropertySafe -Target $button -Property 'Foreground' -Value $ThemeColors.Text
+                } else {
+                    Set-BrushPropertySafe -Target $button -Property 'Foreground' -Value 'White'
+                }
+            }
 
-          $hoverBrushCandidate = $hoverBrush
-          if (-not $hoverBrushCandidate) { $hoverBrushCandidate = $primaryBrush }
-
-          $hoverColorValue = $Hover
-          if (-not $hoverColorValue) { $hoverColorValue = $Primary }
-
-          # removed invalid call 'ButtonHoverBrush' $hoverBrushCandidate $hoverColorValue
-          # removed invalid call 'ButtonPressedBrush' $hoverBrushCandidate $hoverColorValue
-
-          $buttons = @()
-          Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.Button' -Collection ([ref]$buttons)
-
-          $modernStyle = $form.Resources['ModernButton']
-          foreach ($button in $buttons) {
-              if ($modernStyle -and $button.Style -eq $modernStyle) {
-                  if ($primaryBrush) {
-                      Set-BrushPropertySafe -Target $button -Property 'Background' -Value $primaryBrush
-                      Set-BrushPropertySafe -Target $button -Property 'BorderBrush' -Value $primaryBrush
-                  } elseif ($Primary) {
-                      Set-BrushPropertySafe -Target $button -Property 'Background' -Value $Primary
-                      Set-BrushPropertySafe -Target $button -Property 'BorderBrush' -Value $Primary
-                  }
-              }
-
-          Normalize-BrushResources -Resources $form.Resources -Keys @('ButtonBackgroundBrush','ButtonBorderBrush','ButtonHoverBrush','ButtonPressedBrush') -AllowTransparentFallback
-
-          $errorMessage = 'Error updating button styles: {0}' -f $_.Exception.Message
-          Log $errorMessage 'Warning'
+            if ($Hover) {
+                try {
+                    $hoverBrush = New-SolidColorBrushSafe $Hover
+                    if ($hoverBrush) {
+                        $button.Resources['HoverBackground'] = $hoverBrush
+                    }
+                } catch {
+                    Write-Verbose ("Update-ButtonStyles: Hover brush skipped: {0}" -f $_.Exception.Message)
+                }
+            }
+        }
+    } catch {
+        $errorMessage = 'Error updating button styles: {0}' -f $_.Exception.Message
+        Log $errorMessage 'Warning'
+    }
+}
 
 function Update-ComboBoxStyles {
-    param($Background, $Foreground, $Border, $ThemeName = 'OptimizerDark')
+    [CmdletBinding()]
+    param(
+        [string]$Background,
+        [string]$Foreground,
+        [string]$Border,
+        [string]$ThemeName = 'OptimizerDark',
+        [hashtable]$ThemeColors = $null
+    )
 
-        $themeColors = Get-ThemeColors -ThemeName $ThemeName
-        $isLight = $false
-        if ($themeColors -and $themeColors.ContainsKey('IsLight')) {
-            $isLight = [bool]$themeColors['IsLight']
+    if (-not $form) {
+        return
+    }
 
+    try {
+        if (-not $ThemeColors) {
+            $ThemeColors = Get-ThemeColors -ThemeName $ThemeName
+        }
+        if ($ThemeColors) {
+            $ThemeColors = Normalize-ThemeColorTable $ThemeColors
         }
 
-    $comboBoxes = @()
-    Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.ComboBox' -Collection ([ref]$comboBoxes)
+        $actualBackground = if ($ThemeColors -and $ThemeColors.ContainsKey('Secondary')) { $ThemeColors.Secondary } else { $Background }
+        $actualForeground = if ($ThemeColors -and $ThemeColors.ContainsKey('Text')) { $ThemeColors.Text } else { $Foreground }
+        $actualBorder = if ($ThemeColors -and $ThemeColors.ContainsKey('Primary')) { $ThemeColors.Primary } else { $Border }
 
-        $actualBackground = if ($isLight) {
-            'White'
-        } elseif ($themeColors -and $themeColors.Secondary) {
-            $themeColors.Secondary
-        } else {
-            $Background
-
-        $actualForeground = if ($themeColors -and $themeColors.Text) {
-            $themeColors.Text
-        } else {
-            $Foreground
-
-        $itemBackground = if ($isLight) { 'White' } else { $actualBackground }
-        $itemForeground = $actualForeground
+        $comboBoxes = @()
+        Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.ComboBox' -Collection ([ref]$comboBoxes)
 
         foreach ($combo in $comboBoxes) {
-            Set-BrushPropertySafe -Target $combo -Property 'Background' -Value $actualBackground
-            Set-BrushPropertySafe -Target $combo -Property 'Foreground' -Value $actualForeground
-            Set-BrushPropertySafe -Target $combo -Property 'BorderBrush' -Value $Border -AllowTransparentFallback
-
-                $combo.FontSize = 13
-                $combo.FontWeight = 'Normal'
-                Write-Verbose 'ComboBox font styling skipped for compatibility'
+            if ($actualBackground) {
+                Set-BrushPropertySafe -Target $combo -Property 'Background' -Value $actualBackground
+            }
+            if ($actualForeground) {
+                Set-BrushPropertySafe -Target $combo -Property 'Foreground' -Value $actualForeground
+            }
+            if ($actualBorder) {
+                Set-BrushPropertySafe -Target $combo -Property 'BorderBrush' -Value $actualBorder -AllowTransparentFallback
             }
 
             foreach ($item in $combo.Items) {
                 if ($item -is [System.Windows.Controls.ComboBoxItem]) {
-                    Set-BrushPropertySafe -Target $item -Property 'Background' -Value $itemBackground
-                    Set-BrushPropertySafe -Target $item -Property 'Foreground' -Value $itemForeground
-
-                        $item.Padding = '12,6'
-                        $item.MinHeight = 30
-                        $item.FontSize = 13
-                        Write-Verbose 'ComboBoxItem styling skipped for compatibility'
+                    if ($actualBackground) {
+                        Set-BrushPropertySafe -Target $item -Property 'Background' -Value $actualBackground
+                    }
+                    if ($actualForeground) {
+                        Set-BrushPropertySafe -Target $item -Property 'Foreground' -Value $actualForeground
                     }
                 }
+            }
 
+            try {
                 $combo.InvalidateVisual()
                 $combo.UpdateLayout()
-                Write-Verbose 'ComboBox refresh skipped for compatibility'
-
+            } catch {
+                Write-Verbose ("Update-ComboBoxStyles: refresh skipped: {0}" -f $_.Exception.Message)
+            }
+        }
+    } catch {
         $errorMessage = 'Error updating ComboBox styles: {0}' -f $_.Exception.Message
         Log $errorMessage 'Warning'
+    }
+}
 
 function Update-TextStyles {
-    param($Foreground, $Header, $ThemeName = 'OptimizerDark')
+    [CmdletBinding()]
+    param(
+        [string]$Foreground,
+        [string]$Header,
+        [string]$ThemeName = 'OptimizerDark',
+        [hashtable]$ThemeColors = $null
+    )
 
-        $colors = Get-ThemeColors -ThemeName $ThemeName
-        $isLight = $false
-        if ($colors -and $colors.ContainsKey('IsLight')) {
-            $isLight = [bool]$colors['IsLight']
+    if (-not $form) {
+        return
+    }
 
+    try {
+        if (-not $ThemeColors) {
+            $ThemeColors = Get-ThemeColors -ThemeName $ThemeName
+        }
+        if ($ThemeColors) {
+            $ThemeColors = Normalize-ThemeColorTable $ThemeColors
         }
 
-    $textBlocks = @()
-    Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.TextBlock' -Collection ([ref]$textBlocks)
+        $textColor = if ($ThemeColors -and $ThemeColors.ContainsKey('Text')) { $ThemeColors.Text } else { $Foreground }
+        $headerColor = if ($ThemeColors -and $ThemeColors.ContainsKey('Accent')) { $ThemeColors.Accent } else { $Header }
 
+        $textBlocks = @()
+        Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.TextBlock' -Collection ([ref]$textBlocks)
         foreach ($textBlock in $textBlocks) {
             if ($textBlock.Tag -eq 'AccentText') { continue }
 
-            $targetColor = if ($textBlock.Style -eq $form.Resources['HeaderText']) {
-                $Header
+            $target = if ($textBlock.Style -and $form.Resources.Contains('HeaderText') -and $textBlock.Style -eq $form.Resources['HeaderText']) {
+                $headerColor
             } else {
-                $Foreground
+                $textColor
             }
 
-            Set-BrushPropertySafe -Target $textBlock -Property 'Foreground' -Value $targetColor
-
-                if (-not $textBlock.FontSize -or $textBlock.FontSize -lt 11) {
-                    $textBlock.FontSize = 11
-
-                }
-
-                if ($isLight) {
-                    $textBlock.FontWeight = 'Normal'
-                    if ($textBlock.Text -and $textBlock.Text.Length -gt 50) {
-                        Set-BrushPropertySafe -Target $textBlock -Property 'Foreground' -Value $colors.TextSecondary
-                    }
-                }
-                Write-Verbose 'TextBlock enhancement skipped for compatibility'
+            if ($target) {
+                Set-BrushPropertySafe -Target $textBlock -Property 'Foreground' -Value $target
             }
+        }
 
-    $labels = @()
-    Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.Label' -Collection ([ref]$labels)
-
+        $labels = @()
+        Find-AllControlsOfType -Parent $form -ControlType 'System.Windows.Controls.Label' -Collection ([ref]$labels)
         foreach ($label in $labels) {
-            Set-BrushPropertySafe -Target $label -Property 'Foreground' -Value $Foreground
-                if (-not $label.FontSize -or $label.FontSize -lt 11) {
-                    $label.FontSize = 11
-
-                }
-                if ($isLight) {
-                    $label.FontWeight = 'Normal'
-                }
-                Write-Verbose 'Label enhancement skipped for compatibility'
+            if ($textColor) {
+                Set-BrushPropertySafe -Target $label -Property 'Foreground' -Value $textColor
             }
-
+        }
+    } catch {
         $errorMessage = 'Error updating text styles: {0}' -f $_.Exception.Message
         Log $errorMessage 'Warning'
+    }
+}
 
 function Update-ThemeColorPreview {
-    param([string]$ThemeName)
+    [CmdletBinding()]
+    param(
+        [string]$ThemeName,
+        [hashtable]$ThemeColors = $null
+    )
 
     if (-not $previewBg -or -not $previewPrimary -or -not $previewHover -or -not $previewText) {
         return
     }
 
-        $colors = if ($ThemeName -eq 'Custom' -and $global:CustomThemeColors) {
-            $global:CustomThemeColors
-
-        } else {
-            Get-ThemeColors -ThemeName $ThemeName
+    try {
+        if (-not $ThemeColors) {
+            if ($ThemeName -eq 'Custom' -and $global:CustomThemeColors) {
+                $ThemeColors = $global:CustomThemeColors
+            } else {
+                $ThemeColors = Get-ThemeColors -ThemeName $ThemeName
+            }
         }
 
-        $colors = Normalize-ThemeColorTable $colors
+        if (-not $ThemeColors) {
+            return
+        }
 
-        $bgBrush = New-SolidColorBrushSafe $colors.Background
-        $primaryBrush = New-SolidColorBrushSafe $colors.Primary
-        $hoverBrush = New-SolidColorBrushSafe $colors.Hover
-        $textBrush = New-SolidColorBrushSafe $colors.Text
+        $ThemeColors = Normalize-ThemeColorTable $ThemeColors
+
+        $bgBrush = if ($ThemeColors.ContainsKey('Background')) { New-SolidColorBrushSafe $ThemeColors.Background } else { $null }
+        $primaryBrush = if ($ThemeColors.ContainsKey('Primary')) { New-SolidColorBrushSafe $ThemeColors.Primary } else { $null }
+        $hoverBrush = if ($ThemeColors.ContainsKey('Hover')) { New-SolidColorBrushSafe $ThemeColors.Hover } else { $null }
+        $textBrush = if ($ThemeColors.ContainsKey('Text')) { New-SolidColorBrushSafe $ThemeColors.Text } else { $null }
 
         if ($bgBrush) { $previewBg.Fill = $bgBrush.Clone() }
         if ($primaryBrush) { $previewPrimary.Fill = $primaryBrush.Clone() }
@@ -2185,8 +2168,13 @@ function Update-ThemeColorPreview {
             if ($txtCustomText) { $txtCustomText.Text = $global:CustomThemeColors.Text }
         }
 
-        Log "Farb-Vorschau für '$($colors.Name)' aktualisiert" 'Info'
-        Log "Fehler bei Farb-Vorschau: $($_.Exception.Message)" 'Warning'
+        if ($ThemeColors.ContainsKey('Name')) {
+            Log ("Farb-Vorschau für '{0}' aktualisiert" -f $ThemeColors.Name) 'Info'
+        }
+    } catch {
+        Log ("Fehler bei Farb-Vorschau: {0}" -f $_.Exception.Message) 'Warning'
+    }
+}
 
 function Apply-ThemeColors {
     [CmdletBinding(DefaultParameterSetName='ByTheme')]
@@ -2205,6 +2193,12 @@ function Apply-ThemeColors {
         [switch]$IsFallback
     )
 
+    try {
+        if (-not $form) {
+            Log 'UI-Formular nicht verfügbar, Theme kann nicht angewendet werden.' 'Error'
+            return
+        }
+
         if ($PSCmdlet.ParameterSetName -eq 'ByCustom') {
             $colors = (Get-ThemeColors -ThemeName 'OptimizerDark').Clone()
             $colors['Name'] = 'Custom Theme'
@@ -2215,588 +2209,107 @@ function Apply-ThemeColors {
                 $colors['SidebarBg'] = $Background
                 $colors['HeaderBg'] = $Background
                 $colors['LogBg'] = $Background
-
             }
 
             if ($PSBoundParameters.ContainsKey('Primary') -and -not [string]::IsNullOrWhiteSpace($Primary)) {
                 $colors['Primary'] = $Primary
                 $colors['Accent'] = $Primary
-                $colors['SelectedBackground'] = $Primary
             }
 
             if ($PSBoundParameters.ContainsKey('Hover') -and -not [string]::IsNullOrWhiteSpace($Hover)) {
                 $colors['Hover'] = $Hover
-                $colors['HoverBackground'] = $Hover
-            } elseif ($PSBoundParameters.ContainsKey('Primary') -and -not [string]::IsNullOrWhiteSpace($Primary)) {
-                $colors['HoverBackground'] = $Primary
             }
 
             if ($PSBoundParameters.ContainsKey('Foreground') -and -not [string]::IsNullOrWhiteSpace($Foreground)) {
                 $colors['Text'] = $Foreground
-                $colors['SelectedForeground'] = $Foreground
-                $colors['UnselectedForeground'] = $Foreground
                 $colors['TextSecondary'] = $Foreground
             }
-
-            $appliedThemeName = 'Custom'
         } else {
-            if ($ThemeName -eq 'Custom' -and $global:CustomThemeColors) {
-                $colors = $global:CustomThemeColors.Clone()
-            } else {
-                $colors = (Get-ThemeColors -ThemeName $ThemeName).Clone()
-            $appliedThemeName = $ThemeName
+            $colors = Get-ThemeColors -ThemeName $ThemeName
+            if (-not $colors) {
+                throw "Theme '$ThemeName' wurde nicht gefunden."
+            }
+        }
 
         $colors = Normalize-ThemeColorTable $colors
+        $appliedThemeName = if ($colors.ContainsKey('Name')) { $colors.Name } else { $ThemeName }
 
-        if ($PSCmdlet.ParameterSetName -eq 'ByCustom') {
-            $global:CustomThemeColors = $colors.Clone()
-        }
-
-        if (-not $form) {
-            Log "Window form nicht verfügbar für Theme-Anwendung" 'Error'
-            return
-        }
-
-        Log "Wende Theme '$($colors.Name)' an..." 'Info'
-
-            $cardStartValue = if ($colors.ContainsKey('CardBackgroundStart') -and $colors['CardBackgroundStart']) { $colors['CardBackgroundStart'] } else { $colors.Secondary }
-            $cardEndValue = if ($colors.ContainsKey('CardBackgroundEnd') -and $colors['CardBackgroundEnd']) { $colors['CardBackgroundEnd'] } else { $colors.Background }
-            $summaryStartValue = if ($colors.ContainsKey('SummaryBackgroundStart') -and $colors['SummaryBackgroundStart']) { $colors['SummaryBackgroundStart'] } else { $cardStartValue }
-            $summaryEndValue = if ($colors.ContainsKey('SummaryBackgroundEnd') -and $colors['SummaryBackgroundEnd']) { $colors['SummaryBackgroundEnd'] } else { $cardEndValue }
-            $cardBorderValue = if ($colors.ContainsKey('CardBorder') -and $colors['CardBorder']) { $colors['CardBorder'] } else { $colors.Primary }
-            $glowAccentValue = if ($colors.ContainsKey('GlowAccent') -and $colors['GlowAccent']) { $colors['GlowAccent'] } else { $colors.Accent }
-            $gaugeBackgroundValue = if ($colors.ContainsKey('GaugeBackground') -and $colors['GaugeBackground']) { $colors['GaugeBackground'] } else { $colors.Secondary }
-            $gaugeStrokeValue = if ($colors.ContainsKey('GaugeStroke') -and $colors['GaugeStroke']) { $colors['GaugeStroke'] } else { $colors.Primary }
-
-            $cardBrush = New-SolidColorBrushSafe $cardStartValue
-            if (-not $cardBrush) { $cardBrush = New-SolidColorBrushSafe $cardEndValue }
-            if (-not $cardBrush) { $cardBrush = New-SolidColorBrushSafe $colors.Secondary }
-
-            $summaryBrush = New-SolidColorBrushSafe $summaryStartValue
-            if (-not $summaryBrush) { $summaryBrush = New-SolidColorBrushSafe $summaryEndValue }
-            if (-not $summaryBrush) { $summaryBrush = $cardBrush }
-
-            $cardBorderBrush = New-SolidColorBrushSafe $cardBorderValue
-            if (-not $cardBorderBrush) { $cardBorderBrush = New-SolidColorBrushSafe $colors.Primary }
-
-            $contentBrush = New-SolidColorBrushSafe $colors.Secondary
-            if ($contentBrush -is [System.Windows.Media.Brush]) {
-                try { $form.Resources['ContentBackgroundBrush'] = $contentBrush } catch { Write-Verbose "Content background resource assignment skipped" }
-
+        $form.Dispatcher.Invoke([Action]{
+            if ($colors.ContainsKey('Background')) {
+                Set-BrushPropertySafe -Target $form -Property 'Background' -Value $colors.Background
             }
+            Update-AllUIElementsRecursively -Element $form -Colors $colors
+        }, [System.Windows.Threading.DispatcherPriority]::Render)
 
-            $heroBrush = New-SolidColorBrushSafe $summaryBrush
-            if (-not $heroBrush) { $heroBrush = $summaryBrush }
-            if ($heroBrush -is [System.Windows.Media.Brush]) {
-                try { $form.Resources['HeroCardBrush'] = $heroBrush } catch { Write-Verbose "HeroCardBrush resource assignment skipped" }
-            }
-
-            $gaugeBackgroundBrush = New-SolidColorBrushSafe $gaugeBackgroundValue
-            if (-not $gaugeBackgroundBrush) { $gaugeBackgroundBrush = New-SolidColorBrushSafe $colors.Secondary }
-
-            $gaugeStrokeBrush = New-SolidColorBrushSafe $gaugeStrokeValue
-            if (-not $gaugeStrokeBrush) { $gaugeStrokeBrush = New-SolidColorBrushSafe $colors.Primary }
-
-            $innerGaugeBrush = New-SolidColorBrushSafe $colors.Background
-            if (-not $innerGaugeBrush) { $innerGaugeBrush = New-SolidColorBrushSafe '#000000' }
-
-            $resourceColors = @{
-                'AppBackgroundBrush'             = $colors.Background
-                'SidebarBackgroundBrush'         = $colors.SidebarBg
-                'SidebarAccentBrush'             = $colors.Primary
-                'SidebarHoverBrush'              = if ($colors.ContainsKey('HoverBackground') -and $colors['HoverBackground']) { $colors['HoverBackground'] } elseif ($colors.ContainsKey('Hover')) { $colors['Hover'] } else { $colors.Primary }
-                'SidebarSelectedBrush'           = if ($colors.ContainsKey('SelectedBackground')) { $colors['SelectedBackground'] } else { $colors.Primary }
-                'SidebarSelectedForegroundBrush' = if ($colors.ContainsKey('SelectedForeground')) { $colors['SelectedForeground'] } else { $colors.Text }
-                'HeaderBackgroundBrush'          = $colors.HeaderBg
-                'HeaderBorderBrush'              = if ($cardBorderBrush) { $cardBorderBrush } else { $cardBorderValue }
-                'CardBackgroundBrush'            = if ($cardBrush) { $cardBrush } else { $colors.Secondary }
-                'CardBorderBrush'                = if ($cardBorderBrush) { $cardBorderBrush } else { $cardBorderValue }
-                'AccentBrush'                    = if ($colors.ContainsKey('Accent') -and $colors['Accent']) { $colors['Accent'] } else { $colors.Primary }
-                'ButtonBackgroundBrush'          = if ($colors.ContainsKey('ButtonBackground') -and $colors['ButtonBackground']) { $colors['ButtonBackground'] } else { $colors.Primary }
-                'ButtonBorderBrush'              = if ($colors.ContainsKey('ButtonBorder') -and $colors['ButtonBorder']) { $colors['ButtonBorder'] } else { $colors.Primary }
-                'ButtonHoverBrush'               = if ($colors.ContainsKey('ButtonHover') -and $colors['ButtonHover']) { $colors['ButtonHover'] } elseif ($colors.ContainsKey('HoverBackground') -and $colors['HoverBackground']) { $colors['HoverBackground'] } elseif ($colors.ContainsKey('Hover')) { $colors['Hover'] } else { $colors.Primary }
-                'ButtonPressedBrush'             = if ($colors.ContainsKey('ButtonPressed') -and $colors['ButtonPressed']) { $colors['ButtonPressed'] } elseif ($colors.ContainsKey('Hover') -and $colors['Hover']) { $colors['Hover'] } else { $colors.Primary }
-                'PrimaryTextBrush'               = $colors.Text
-                'SecondaryTextBrush'             = $colors.TextSecondary
-                'HeroChipBrush'                  = if ($colors.ContainsKey('HeroChip') -and $colors['HeroChip']) { $colors['HeroChip'] } elseif ($colors.ContainsKey('HoverBackground') -and $colors['HoverBackground']) { $colors['HoverBackground'] } else { $colors.Accent }
-                'SuccessBrush'                   = if ($colors.ContainsKey('Success')) { $colors['Success'] } else { '#10B981' }
-                'WarningBrush'                   = if ($colors.ContainsKey('Warning')) { $colors['Warning'] } else { '#F59E0B' }
-                'DangerBrush'                    = if ($colors.ContainsKey('Danger')) { $colors['Danger'] } else { '#EF4444' }
-                'InfoBrush'                      = if ($colors.ContainsKey('Info')) { $colors['Info'] } else { $colors.Primary }
-            }
-
-            foreach ($resourceKey in $resourceColors.Keys) {
-                $value = $resourceColors[$resourceKey]
-                if ($null -eq $value) { continue }
-
-                $brush = Convert-ToBrushResource -Value $value
-                if (-not $brush) {
-                    $brush = Convert-ToBrushResource -Value $value -AllowTransparentFallback
-                }
-
-                if ($brush -is [System.Windows.Media.Brush]) {
-                    try { $form.Resources[$resourceKey] = $brush } catch { Write-Verbose "Resource brush '$resourceKey' could not be updated: $($_.Exception.Message)" }
-                } else {
-                    Write-Verbose "Resource brush '$resourceKey' skipped due to unresolved value"
-                }
-
-            if ($form -and $form.Resources) {
-                Register-BrushResourceKeys -Keys $form.Resources.Keys
-            }
-
-            $targetBrushKeys = @($script:BrushResourceKeys)
-            if ($form -and $form.Resources) {
-                    foreach ($resourceKey in $form.Resources.Keys) {
-                        if ($resourceKey -is [string] -and $resourceKey.EndsWith('Brush') -and ($targetBrushKeys -notcontains $resourceKey)) {
-                            $targetBrushKeys += $resourceKey
-
-                        }
-                    }
-                    # Ignore enumeration errors and fall back to the static list
-                }
-
-            Normalize-BrushResources -Resources $form.Resources -Keys $targetBrushKeys -AllowTransparentFallback
-
-            $glowEffect = $null
-            try { $form.Resources['CardGlow'] = $null } catch { Write-Verbose "CardGlow reset skipped: $($_.Exception.Message)" }
-
-            $summaryPanel = $form.FindName('dashboardSummaryPanel')
-            if ($summaryPanel -is [System.Windows.Controls.Border]) {
-                Set-BrushPropertySafe -Target $summaryPanel -Property 'Background' -Value $summaryBrush
-                Set-BrushPropertySafe -Target $summaryPanel -Property 'BorderBrush' -Value $cardBorderBrush
-                $summaryPanel.Effect = $null
-            }
-
-            $dashboardCards = @(
-                'dashboardSummaryRibbon',
-                'dashboardHeroCard',
-                'dashboardSummaryPanel',
-                'dashboardCpuCard',
-                'dashboardMemoryCard',
-                'dashboardActivityCard',
-                'dashboardHealthCard',
-                'dashboardQuickActionsCard',
-                'dashboardActionBar',
-                'dashboardGameProfileCard',
-                'dashboardGameListCard'
-            )
-
-            foreach ($cardName in $dashboardCards) {
-                $card = $form.FindName($cardName)
-                if ($card -is [System.Windows.Controls.Border]) {
-                    Set-BrushPropertySafe -Target $card -Property 'Background' -Value $cardBrush
-                    Set-BrushPropertySafe -Target $card -Property 'BorderBrush' -Value $cardBorderBrush
-                    $card.Effect = $null
-                }
-            }
-
-            foreach ($ellipseName in 'ellipseCpuRing', 'ellipseMemoryRing') {
-                $ellipse = $form.FindName($ellipseName)
-                if ($ellipse) {
-                    Set-BrushPropertySafe -Target $ellipse -Property 'Fill' -Value $gaugeBackgroundBrush
-                    Set-BrushPropertySafe -Target $ellipse -Property 'Stroke' -Value $gaugeStrokeBrush
-                }
-            }
-
-            foreach ($innerEllipseName in 'ellipseCpuInner', 'ellipseMemoryInner') {
-                $innerEllipse = $form.FindName($innerEllipseName)
-                if ($innerEllipse) {
-                    Set-BrushPropertySafe -Target $innerEllipse -Property 'Fill' -Value $innerGaugeBrush
-                }
-            }
-            Log "Fehler beim Aktualisieren der Dashboard-Hintergründe: $($_.Exception.Message)" 'Warning'
-
-        $backgroundBrush = New-SolidColorBrushSafe $colors.Background
-        $secondaryBrush = New-SolidColorBrushSafe $colors.Secondary
-        $sidebarBrush = New-SolidColorBrushSafe $colors.SidebarBg
-        $headerBrush = New-SolidColorBrushSafe $colors.HeaderBg
-        $primaryBrush = New-SolidColorBrushSafe $colors.Primary
-
-        $formBackgroundValue = if ($backgroundBrush) { $backgroundBrush } else { $colors.Background }
-            Set-BrushPropertySafe -Target $form -Property 'Background' -Value $formBackgroundValue
-            Write-Verbose "Form background assignment skipped"
-
-        $rootLayout = $form.FindName('RootLayout')
-        if ($rootLayout) {
-                $rootLayoutBackground = if ($backgroundBrush) { $backgroundBrush } else { $colors.Background }
-                Set-BrushPropertySafe -Target $rootLayout -Property 'Background' -Value $rootLayoutBackground
-                Write-Verbose "RootLayout background assignment skipped"
-            }
-
-        $sidebar = $form.FindName('SidebarShell')
-        if ($sidebar -is [System.Windows.Controls.Border]) {
-            $sidebarBackground = if ($sidebarBrush) { $sidebarBrush } else { $colors.SidebarBg }
-            Set-BrushPropertySafe -Target $sidebar -Property 'Background' -Value $sidebarBackground
-                $sidebarBorder = if ($primaryBrush) { $primaryBrush } else { $colors.Primary }
-                Set-BrushPropertySafe -Target $sidebar -Property 'BorderBrush' -Value $sidebarBorder -AllowTransparentFallback
-                Write-Verbose "Sidebar border assignment skipped"
-            }
-
-        $navScroll = $form.FindName('SidebarNavScroll')
-        if ($navScroll -is [System.Windows.Controls.ScrollViewer]) {
-                $navScrollBackground = if ($sidebarBrush) { $sidebarBrush } else { $colors.SidebarBg }
-                Set-BrushPropertySafe -Target $navScroll -Property 'Background' -Value $navScrollBackground
-                Write-Verbose "Sidebar scroll background skipped"
-            }
-
-        $adminCard = $form.FindName('SidebarAdminCard')
-        if ($adminCard -is [System.Windows.Controls.Border]) {
-            $adminBackground = if ($headerBrush) { $headerBrush } else { $colors.HeaderBg }
-            Set-BrushPropertySafe -Target $adminCard -Property 'Background' -Value $adminBackground
-                $adminBorder = if ($primaryBrush) { $primaryBrush } else { $colors.Primary }
-                Set-BrushPropertySafe -Target $adminCard -Property 'BorderBrush' -Value $adminBorder -AllowTransparentFallback
-                Write-Verbose "Sidebar admin border assignment skipped"
-            }
-
-        $mainStage = $form.FindName('MainStage')
-        if ($mainStage -is [System.Windows.Controls.Grid]) {
-                $mainStageBackground = if ($secondaryBrush) { $secondaryBrush } else { $colors.Secondary }
-                Set-BrushPropertySafe -Target $mainStage -Property 'Background' -Value $mainStageBackground
-                Write-Verbose "MainStage background assignment skipped"
-            }
-
-        $headerBar = $form.FindName('HeaderBar')
-        if ($headerBar -is [System.Windows.Controls.Border]) {
-            $headerBackground = if ($headerBrush) { $headerBrush } else { $colors.HeaderBg }
-            Set-BrushPropertySafe -Target $headerBar -Property 'Background' -Value $headerBackground
-                $headerBorder = if ($primaryBrush) { $primaryBrush } else { $colors.Primary }
-                Set-BrushPropertySafe -Target $headerBar -Property 'BorderBrush' -Value $headerBorder -AllowTransparentFallback
-                Write-Verbose "Header border assignment skipped"
-            }
-
-        $footerBar = $form.FindName('FooterBar')
-        if ($footerBar -is [System.Windows.Controls.Border]) {
-            $footerBackground = if ($headerBrush) { $headerBrush } else { $colors.HeaderBg }
-            Set-BrushPropertySafe -Target $footerBar -Property 'Background' -Value $footerBackground
-                $footerBorder = if ($primaryBrush) { $primaryBrush } else { $colors.Primary }
-                Set-BrushPropertySafe -Target $footerBar -Property 'BorderBrush' -Value $footerBorder -AllowTransparentFallback
-                Write-Verbose "Footer border assignment skipped"
-            }
-
-        $mainScroll = $form.FindName('MainScrollViewer')
-        if ($mainScroll -is [System.Windows.Controls.ScrollViewer]) {
-            try { Set-BrushPropertySafe -Target $mainScroll -Property 'Background' -Value [System.Windows.Media.Brushes]::Transparent } catch { Write-Verbose "Main scroll background skipped" }
-        }
-
-            Update-AllUIElementsRecursively -element $form -colors $colors
-            Log "Rekursive UI-Element-Aktualisierung abgeschlossen" 'Info'
-            if ($_.Exception.Message -match "sealed|IsSealed") {
-                Log "SetterBase sealed style detected - applying fallback theming strategy" 'Warning'
-                    Apply-FallbackThemeColors -element $form -colors $colors
-                    Log "Fallback theming strategy erfolgreich angewendet" 'Info'
-                    Log "Fallback theming strategy fehlgeschlagen: $($_.Exception.Message)" 'Error'
-                }
-                throw
-
-            $panels = @($panelDashboard, $panelBasicOpt, $panelAdvanced, $panelGames, $panelOptions, $panelBackup, $panelLog)
-            foreach ($panel in $panels) {
-                if ($panel) {
-                    try {
-                        $panel.InvalidateVisual()
-                        $panel.InvalidateMeasure()
-                        $panel.UpdateLayout()
-                    } catch {
-                    }
-                }
-
-            function Find-ScrollViewers($element) {
-                if ($element -is [System.Windows.Controls.ScrollViewer]) {
-                    $script:scrollViewers += $element
-                }
-
-                if ($element.Children) {
-                    foreach ($child in $element.Children) {
-                        Find-ScrollViewers $child
-                    }
-                } elseif ($element.Content) {
-                    Find-ScrollViewers $element.Content
-                } elseif ($element.Child) {
-                    Find-ScrollViewers $element.Child
-
-            $form.Dispatcher.Invoke([action]{
-
-                $form.InvalidateVisual()
-                $form.InvalidateMeasure()
-                $form.InvalidateArrange()
-                $form.UpdateLayout()
-
-                $script:scrollViewers = @()
-                Find-ScrollViewers $form
-
-                foreach ($scrollViewer in $script:scrollViewers) {
-                        $scrollViewer.InvalidateVisual()
-                        $scrollViewer.UpdateLayout()
-                    }
-                }
-
-
-            $form.Dispatcher.BeginInvoke([action]{
-                    $backgroundBrush = $null
-                    try {
-                        $backgroundBrush = New-SolidColorBrushSafe $colors.Background
-                    } catch {
-                        $backgroundBrush = $null
-                    }
-
-                    if ($backgroundBrush) {
-                        Set-BrushPropertySafe -Target $form -Property 'Background' -Value $backgroundBrush
-                    } else {
-                            $converter = New-Object System.Windows.Media.BrushConverter
-                            $converted = $converter.ConvertFromString($colors.Background)
-                            if ($converted) {
-                                Set-BrushPropertySafe -Target $form -Property 'Background' -Value $converted
-
-                            } else {
-                                Set-BrushPropertySafe -Target $form -Property 'Background' -Value $colors.Background
-                            Set-BrushPropertySafe -Target $form -Property 'Background' -Value $colors.Background
-                    Write-Verbose "Background refresh skipped: $($_.Exception.Message)"
-
-                $form.InvalidateVisual()
-                $form.UpdateLayout()
-
-            Log '[OK] Vollständiger UI-Refresh abgeschlossen - alle Änderungen sofort sichtbar!' 'Success'
-
-            $warningMessage = '⚠️ UI-Refresh teilweise fehlgeschlagen: {0}' -f $_.Exception.Message
-            Log $warningMessage 'Warning'
-
-                $form.InvalidateVisual()
-                $form.UpdateLayout()
-                Log 'Fallback-Refresh durchgeführt' 'Info'
-                Log 'Auch Fallback-Refresh fehlgeschlagen' 'Error'
-
-        $global:CurrentTheme = $appliedThemeName
-        Update-ButtonStyles -Primary $colors.Primary -Hover $colors.Hover
-        Update-ComboBoxStyles -Background $colors.Secondary -Foreground $colors.Text -Border $colors.Primary -ThemeName $appliedThemeName
-        Update-TextStyles -Foreground $colors.Text -Header $colors.Accent -ThemeName $appliedThemeName
+        Update-ButtonStyles -Primary $colors.Primary -Hover $colors.Hover -ThemeColors $colors
+        Update-ComboBoxStyles -Background $colors.Secondary -Foreground $colors.Text -Border $colors.Primary -ThemeName $appliedThemeName -ThemeColors $colors
+        Update-TextStyles -Foreground $colors.Text -Header $colors.Accent -ThemeName $appliedThemeName -ThemeColors $colors
 
         Normalize-VisualTreeBrushes -Root $form
 
-        Log "❌ Fehler beim Theme-Wechsel: $($_.Exception.Message)" 'Error'
-
-        $shouldAttemptFallback = -not $IsFallback
-        if ($PSCmdlet.ParameterSetName -eq 'ByTheme' -and $ThemeName -eq 'OptimizerDark') {
-            $shouldAttemptFallback = $false
-        }
-
-        if ($shouldAttemptFallback) {
-                if (${function:Apply-ThemeColors}) {
-                    & ${function:Apply-ThemeColors} -ThemeName 'OptimizerDark' -IsFallback
-                    Log "Standard-Theme als Fallback angewendet" 'Info'
-
-                } else {
-                    Log "Fallback-Theme konnte nicht geladen werden (Function nicht verfügbar)" 'Error'
-                }
-                Log "KRITISCHER FEHLER: Kein Theme kann angewendet werden." 'Error'
-            Log "KRITISCHER FEHLER: Kein Theme kann angewendet werden." 'Error'
-
-function Switch-Theme {
-    param([string]$ThemeName)
-
-        if (-not $ThemeName) {
-            Log "Theme-Name ist leer, verwende Standard" 'Warning'
-            $ThemeName = "OptimizerDark"
-
-        }
-
-        if (-not $form) {
-            Log "UI-Formular nicht verfügbar, Theme kann nicht gewechselt werden" 'Error'
-            return
-        }
-
-        if ($ThemeName -eq 'Custom' -and $global:CustomThemeColors) {
-            $themeColors = $global:CustomThemeColors.Clone()
-        } else {
-            if (-not $global:ThemeDefinitions.ContainsKey($ThemeName)) {
-                Log "Theme '$ThemeName' nicht gefunden, wechsle zu Optimizer Dark" 'Warning'
-                $ThemeName = "OptimizerDark"
-            }
-
-            $themeColors = (Get-ThemeColors -ThemeName $ThemeName).Clone()
-        }
-
-        $themeColors = Normalize-ThemeColorTable $themeColors
-
-        Log "Wechsle zu Theme '$($themeColors.Name)'..." 'Info'
-
-        if (${function:Apply-ThemeColors}) {
-            & ${function:Apply-ThemeColors} -ThemeName $ThemeName
-        } else {
-            Log "Apply-ThemeColors Funktion nicht verfügbar - Theme kann nicht angewendet werden" 'Error'
-            return
-
-        $form.Dispatcher.Invoke([action]{
-
-                Set-BrushPropertySafe -Target $form -Property 'Background' -Value $themeColors.Background
-                Write-Verbose "Switch-Theme background refresh skipped: $($_.Exception.Message)"
-            }
-
-            $form.InvalidateVisual()
-            $form.InvalidateMeasure()
-            $form.InvalidateArrange()
-            $form.UpdateLayout()
-
-            $navButtons = if ($global:NavigationButtonNames) {
-                $global:NavigationButtonNames
-            } else {
-                @('btnNavDashboard', 'btnNavBasicOpt', 'btnNavAdvanced', 'btnNavGames', 'btnNavOptions', 'btnNavBackup', 'btnNavLog')
-
-            foreach ($btnName in $navButtons) {
-                $btn = $form.FindName($btnName)
-                if ($btn) {
-                    if ($btn.Tag -eq "Selected") {
-                        Set-BrushPropertySafe -Target $btn -Property 'Background' -Value $themeColors.SelectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $btn -Property 'Foreground' -Value $themeColors.SelectedForeground -AllowTransparentFallback
-                    } else {
-                        Set-BrushPropertySafe -Target $btn -Property 'Background' -Value $themeColors.UnselectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $btn -Property 'Foreground' -Value $themeColors.UnselectedForeground -AllowTransparentFallback
-                    }
-
-                    $btn.InvalidateVisual()
-                    $btn.InvalidateMeasure()
-                    $btn.UpdateLayout()
-                }
-
-            if ($form.Children -and $form.Children.Count -gt 0) {
-                $firstChild = $form.Children[0]
-                if ($firstChild.Children -and $firstChild.Children.Count -gt 0) {
-                    $sidebar = $firstChild.Children[0]
-                    if ($sidebar) {
-                        Set-BrushPropertySafe -Target $sidebar -Property 'Background' -Value $themeColors.SidebarBg
-                        Set-BrushPropertySafe -Target $sidebar -Property 'BorderBrush' -Value $themeColors.Primary -AllowTransparentFallback
-
-                        if ($sidebar.Child -is [System.Windows.Controls.Grid]) {
-                            $sidebarGrid = $sidebar.Child
-                            if ($sidebarGrid.Children -and $sidebarGrid.Children.Count -gt 0) {
-                                Set-BrushPropertySafe -Target $sidebarGrid.Children[0] -Property 'Background' -Value $themeColors.SidebarBg
-                            }
-                            if ($sidebarGrid.Children.Count -gt 1 -and $sidebarGrid.Children[1].GetType().GetProperty('Background')) {
-                                try { Set-BrushPropertySafe -Target $sidebarGrid.Children[1] -Property 'Background' -Value $themeColors.SidebarBg } catch { Write-Verbose "Sidebar scroll background skipped" }
-                            }
-                            if ($sidebarGrid.Children.Count -gt 2) {
-                                Set-BrushPropertySafe -Target $sidebarGrid.Children[2] -Property 'Background' -Value $themeColors.SidebarBg
-                                Set-BrushPropertySafe -Target $sidebarGrid.Children[2] -Property 'BorderBrush' -Value $themeColors.Primary -AllowTransparentFallback
-                            }
-                        }
-
-                        $sidebar.InvalidateVisual()
-                        $sidebar.UpdateLayout()
-                    }
-
-                    if ($firstChild.Children.Count -gt 1) {
-                        $mainContent = $firstChild.Children[1]
-                        if ($mainContent) {
-                            if ($mainContent.Children -and $mainContent.Children.Count -gt 0) {
-                                Set-BrushPropertySafe -Target $mainContent.Children[0] -Property 'Background' -Value $themeColors.HeaderBg
-                                Set-BrushPropertySafe -Target $mainContent.Children[0] -Property 'BorderBrush' -Value $themeColors.Primary -AllowTransparentFallback
-                            }
-
-                            if ($mainContent.Children.Count -gt 3) {
-                                Set-BrushPropertySafe -Target $mainContent.Children[3] -Property 'Background' -Value $themeColors.HeaderBg
-                                Set-BrushPropertySafe -Target $mainContent.Children[3] -Property 'BorderBrush' -Value $themeColors.Primary -AllowTransparentFallback
-                            }
-
-                            if ($mainContent.Children.Count -gt 4) {
-                                Set-BrushPropertySafe -Target $mainContent.Children[4] -Property 'Background' -Value $themeColors.LogBg
-                                Set-BrushPropertySafe -Target $mainContent.Children[4] -Property 'BorderBrush' -Value $themeColors.Accent -AllowTransparentFallback
-                            }
-
-                            $mainContent.InvalidateVisual()
-                            $mainContent.UpdateLayout()
-                        }
-                    }
-                }
-            }
-
-            $panels = @($panelDashboard, $panelBasicOpt, $panelAdvanced, $panelGames, $panelOptions, $panelBackup, $panelLog)
-            foreach ($panel in $panels) {
-                if ($panel) {
-                    $panel.InvalidateVisual()
-                    $panel.UpdateLayout()
-                }
-            }
-
-            if ($global:LogBox) {
-                Set-BrushPropertySafe -Target $global:LogBox -Property 'Background' -Value $themeColors.LogBg
-                Set-BrushPropertySafe -Target $global:LogBox -Property 'Foreground' -Value $themeColors.Accent
-                $global:LogBox.InvalidateVisual()
-                $global:LogBox.UpdateLayout()
-            }
-
-            if ($activityLogBorder) {
-                    Set-BrushPropertySafe -Target $activityLogBorder -Property 'Background' -Value $themeColors.LogBg
-                    Set-BorderBrushSafe -Element $activityLogBorder -BorderBrushValue $themeColors.Accent -BorderThicknessValue '0,0,0,2'
-                    $activityLogBorder.InvalidateVisual()
-                    $activityLogBorder.UpdateLayout()
-                    Write-Verbose "Activity log border update skipped: $($_.Exception.Message)"
-                }
-
-            $form.InvalidateVisual()
-            $form.UpdateLayout()
-
-
-        Start-Sleep -Milliseconds 100
-
-        $form.Dispatcher.BeginInvoke([action]{
-            Set-BrushPropertySafe -Target $form -Property 'Background' -Value $themeColors.Background
-            $form.InvalidateVisual()
-            $form.UpdateLayout()
-
-            $navButtons = if ($global:NavigationButtonNames) {
-                $global:NavigationButtonNames
-            } else {
-                @('btnNavDashboard', 'btnNavBasicOpt', 'btnNavAdvanced', 'btnNavGames', 'btnNavOptions', 'btnNavBackup', 'btnNavLog')
-            }
-
-            foreach ($btnName in $navButtons) {
-                $btn = $form.FindName($btnName)
-                if ($btn) {
-                    if ($btn.Tag -eq "Selected") {
-                        Set-BrushPropertySafe -Target $btn -Property 'Background' -Value $themeColors.SelectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $btn -Property 'Foreground' -Value $themeColors.SelectedForeground -AllowTransparentFallback
-                    } else {
-                        Set-BrushPropertySafe -Target $btn -Property 'Background' -Value $themeColors.UnselectedBackground -AllowTransparentFallback
-                        Set-BrushPropertySafe -Target $btn -Property 'Foreground' -Value $themeColors.UnselectedForeground -AllowTransparentFallback
-                    }
-                    $btn.InvalidateVisual()
-                }
-
-
-        Start-Sleep -Milliseconds 150
-
-        $form.Dispatcher.BeginInvoke([action]{
-            Update-AllUIElementsRecursively -element $form -colors $themeColors
-
-            $form.InvalidateVisual()
-            $form.UpdateLayout()
-
-        }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+        $global:CurrentTheme = $appliedThemeName
+        Update-ThemeColorPreview -ThemeName $appliedThemeName -ThemeColors $colors
 
         if ($global:CurrentPanel -eq 'Advanced' -and $global:CurrentAdvancedSection) {
-            $currentSection = $global:CurrentAdvancedSection
-            $themeForHighlight = if ($appliedThemeName) { $appliedThemeName } else { $ThemeName }
-
-                $form.Dispatcher.BeginInvoke([action]{
-                    Set-ActiveAdvancedSectionButton -Section $currentSection -CurrentTheme $themeForHighlight
-
+            try {
+                $form.Dispatcher.BeginInvoke([Action]{
+                    Set-ActiveAdvancedSectionButton -Section $global:CurrentAdvancedSection -CurrentTheme $appliedThemeName
                 }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+            } catch {
                 Log "Could not refresh advanced section highlight: $($_.Exception.Message)" 'Warning'
             }
-
-        Log "[OK] Theme '$($themeColors.Name)' erfolgreich angewendet mit umfassendem UI-Refresh!" 'Success'
-
-        if ($ThemeName -ne 'Custom') {
-            Update-ThemeColorPreview -ThemeName $ThemeName
         }
 
-        Log "❌ Fehler beim Theme-Wechsel: $($_.Exception.Message)" 'Error'
+        Log ("[OK] Theme '{0}' erfolgreich angewendet." -f $appliedThemeName) 'Success'
+    } catch {
+        Log ("❌ Fehler beim Theme-Wechsel: {0}" -f $_.Exception.Message) 'Error'
 
-            if (${function:Apply-ThemeColors}) {
-                & ${function:Apply-ThemeColors} -ThemeName 'OptimizerDark' -IsFallback
-                Log "Standard-Theme als Fallback angewendet" 'Info'
+        $shouldAttemptFallback = -not $IsFallback -and ($PSCmdlet.ParameterSetName -ne 'ByTheme' -or $ThemeName -ne 'OptimizerDark')
 
-            } else {
-                Log "Fallback-Theme konnte nicht geladen werden (Function nicht verfügbar)" 'Error'
-            Log "KRITISCHER FEHLER: Kein Theme kann angewendet werden." 'Error'
+        if ($shouldAttemptFallback) {
+            try {
+                Log 'Versuche Fallback-Theme (OptimizerDark)...' 'Warning'
+                Apply-ThemeColors -ThemeName 'OptimizerDark' -IsFallback
+            } catch {
+                Log 'KRITISCHER FEHLER: Kein Theme kann angewendet werden.' 'Error'
+            }
+        } elseif (-not $IsFallback) {
+            Log 'KRITISCHER FEHLER: Kein Theme kann angewendet werden.' 'Error'
+        }
+    }
+}
+
+function Switch-Theme {
+    [CmdletBinding()]
+    param(
+        [string]$ThemeName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ThemeName)) {
+        Log 'Theme-Name ist leer, verwende Standard.' 'Warning'
+        $ThemeName = 'OptimizerDark'
+    }
+
+    if ($ThemeName -eq 'Custom') {
+        if (-not $global:CustomThemeColors) {
+            Log 'Kein benutzerdefiniertes Theme hinterlegt.' 'Warning'
+            return
+        }
+        Apply-ThemeColors -ThemeName $ThemeName
+        return
+    }
+
+    if (-not $global:ThemeDefinitions.ContainsKey($ThemeName)) {
+        Log ("Theme '{0}' nicht gefunden, wechsle zu OptimizerDark." -f $ThemeName) 'Warning'
+        $ThemeName = 'OptimizerDark'
+    }
+
+    if (${function:Apply-ThemeColors}) {
+        Apply-ThemeColors -ThemeName $ThemeName
+    } else {
+        Log 'Apply-ThemeColors Funktion nicht verfügbar - Theme kann nicht angewendet werden.' 'Error'
+    }
+}
 
 # Log functions moved to top of script to fix call order issues
 
@@ -3101,15 +2614,9 @@ function Update-SystemHealthDisplay {
 
     return $global:SystemHealthData
 
+
 function Show-SystemHealthDialog {
-    <#
-    .SYNOPSIS
-    Shows a detailed system health dialog with recommendations and actions
-    .DESCRIPTION
-    Creates a WPF dialog displaying comprehensive system health information
-    #>
-
-
+    try {
         [xml]$healthDialogXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -3137,23 +2644,17 @@ function Show-SystemHealthDialog {
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="14,6"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Foreground" Value="White"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border Background="{TemplateBinding Background}" CornerRadius="10">
-
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-
-              <Setter Property="Background" Value="#A78BFA"/>
+                <Setter Property="Background" Value="#A78BFA"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
@@ -3181,7 +2682,6 @@ function Show-SystemHealthDialog {
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <!-- Header -->
     <Border Grid.Row="0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -3200,7 +2700,6 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Metrics -->
     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -3213,7 +2712,6 @@ function Show-SystemHealthDialog {
           <TextBlock Text="CPU Usage" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" FontWeight="Bold"/>
           <TextBlock x:Name="lblCpuMetric" Text="--%" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,2,0,0"/>
         </StackPanel>
-
         <StackPanel Grid.Column="1">
           <TextBlock Text="Memory Usage" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" FontWeight="Bold"/>
           <TextBlock x:Name="lblMemoryMetric" Text="--%" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,2,0,0"/>
@@ -3225,9 +2723,7 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Issues and Recommendations -->
     <Border Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15">
-
       <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
@@ -3262,7 +2758,6 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Action Buttons -->
     <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10" Margin="0,15,0,0">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
         <Button x:Name="btnOptimizeNow" Content="⚡ Quick Optimize" Width="140" Height="34" Style="{StaticResource DialogButton}" Margin="0,0,10,0"/>
@@ -3274,12 +2769,10 @@ function Show-SystemHealthDialog {
 </Window>
 '@
 
-        # Create the window
         $reader = New-Object System.Xml.XmlNodeReader $healthDialogXaml
         $healthWindow = [Windows.Markup.XamlReader]::Load($reader)
         Initialize-LayoutSpacing -Root $healthWindow
 
-        # Get controls
         $lblHealthStatus = $healthWindow.FindName('lblHealthStatus')
         $lblHealthScore = $healthWindow.FindName('lblHealthScore')
         $lblCpuMetric = $healthWindow.FindName('lblCpuMetric')
@@ -3292,248 +2785,211 @@ function Show-SystemHealthDialog {
         $btnOpenTaskManager = $healthWindow.FindName('btnOpenTaskManager')
         $btnCloseHealth = $healthWindow.FindName('btnCloseHealth')
 
-        # Update display function
         $updateDisplay = {
             param([bool]$RunCheck = $false)
 
-            $data = Update-SystemHealthDisplay -RunCheck:$RunCheck
+            try {
+                $data = Update-SystemHealthDisplay -RunCheck:$RunCheck
+                if (-not $data -or -not $data.LastHealthCheck) {
+                    $lblHealthStatus.Text = 'Status: Not Run'
+                    $lblHealthScore.Text = 'Health Score: N/A'
+                    $lblCpuMetric.Text = '--%'
+                    $lblMemoryMetric.Text = '--%'
+                    if ($lblDiskMetric) { $lblDiskMetric.Text = '--%' }
+                    $lstIssues.ItemsSource = @()
+                    $lstRecommendations.ItemsSource = @('Click Refresh to run a health check.')
+                    return $null
+                }
 
-            if (-not $data.LastHealthCheck) {
-                $lblHealthStatus.Text = 'Status: Not Run'
-                $lblHealthScore.Text = 'Health Score: N/A'
-                $lblCpuMetric.Text = '--%'
-                $lblMemoryMetric.Text = '--%'
-                if ($lblDiskMetric) { $lblDiskMetric.Text = '--%' }
-                $lstIssues.ItemsSource = @()
-                $lstRecommendations.ItemsSource = @("Click Refresh to run a health check.")
-                return
+                $timestamp = $data.LastHealthCheck.ToString('g')
+                $lblHealthStatus.Text = "Status: $($data.HealthStatus) (Last: $timestamp)"
+                $lblHealthScore.Text = if ($data.HealthScore -ne $null) { "Health Score: $($data.HealthScore)%" } else { 'Health Score: N/A' }
 
+                if ($data.Metrics.ContainsKey('CpuUsage') -and $data.Metrics.CpuUsage -ne $null) {
+                    $lblCpuMetric.Text = "$($data.Metrics.CpuUsage)%"
+                } else {
+                    $lblCpuMetric.Text = '--%'
+                }
+
+                if ($data.Metrics.ContainsKey('MemoryUsage') -and $data.Metrics.MemoryUsage -ne $null) {
+                    $lblMemoryMetric.Text = "$($data.Metrics.MemoryUsage)%"
+                } else {
+                    $lblMemoryMetric.Text = '--%'
+                }
+
+                $issues = @()
+                if ($data.Issues) { $issues += $data.Issues }
+                if ($data.HealthWarnings) { $issues += $data.HealthWarnings }
+                $lstIssues.ItemsSource = $issues
+
+                if ($data.Recommendations) {
+                    $lstRecommendations.ItemsSource = $data.Recommendations
+                } else {
+                    $lstRecommendations.ItemsSource = @('No recommendations available. Great job!')
+                }
+
+                Log "System health dialog updated: $($data.HealthStatus)" 'Info'
+                return $data
             }
-
-            $timestamp = $data.LastHealthCheck.ToString('g')
-            $lblHealthStatus.Text = "Status: $($data.HealthStatus) (Last: $timestamp)"
-            if ($data.HealthScore -ne $null) {
-                $lblHealthScore.Text = "Health Score: $($data.HealthScore)%"
-            } else {
-                $lblHealthScore.Text = 'Health Score: N/A'
+            catch {
+                Log "Error updating System Health dialog: $($_.Exception.Message)" 'Error'
+                return $null
             }
+        }.GetNewClosure()
 
-            if ($data.Metrics.ContainsKey('CpuUsage') -and $data.Metrics.CpuUsage -ne $null) {
-                $lblCpuMetric.Text = "$($data.Metrics.CpuUsage)%"
-            } else {
-                $lblCpuMetric.Text = '--%'
-            }
-
-            if ($data.Metrics.ContainsKey('MemoryUsage') -and $data.Metrics.MemoryUsage -ne $null) {
-                $lblMemoryMetric.Text = "$($data.Metrics.MemoryUsage)%"
-            } else {
-                $lblMemoryMetric.Text = '--%'
-
-            # Disk metric intentionally omitted (legacy compatibility)
-
-            $issues = @()
-            if ($data.Issues) { $issues += $data.Issues }
-            if ($data.HealthWarnings) { $issues += $data.HealthWarnings }
-            $lstIssues.ItemsSource = $issues
-
-            if ($data.Recommendations) {
-                $lstRecommendations.ItemsSource = $data.Recommendations
-            } else {
-                $lstRecommendations.ItemsSource = @('No recommendations available. Great job!')
-
-            Log "System health dialog updated with cached status: $($data.HealthStatus)" 'Info'
-
-        # Event handlers
         $btnRefreshHealth.Add_Click({
-            Log "Manual health check requested from System Health dialog" 'Info'
-            # removed invalid call $true
-        })
+            param($sender, $args)
+
+            $btnRefreshHealth.IsEnabled = $false
+            try {
+                Log 'Manual health check triggered from System Health dialog' 'Info'
+                & $updateDisplay -RunCheck:$true | Out-Null
+            }
+            catch {
+                Log "Health check refresh failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Error running health check: $($_.Exception.Message)", 'Health Monitor', 'OK', 'Error') | Out-Null
+            }
+            finally {
+                $btnRefreshHealth.IsEnabled = $true
+            }
+        }.GetNewClosure())
 
         $btnOptimizeNow.Add_Click({
-            if ($btnApply) {
-                Log "Quick optimization triggered from System Health dialog" 'Info'
-                $healthWindow.Close()
+            param($sender, $args)
 
-                    $btnApply.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))
-                    Log "Error triggering optimization from health dialog: $($_.Exception.Message)" 'Error'
+            try {
+                $command = Get-Command -Name 'Invoke-QuickOptimization' -ErrorAction SilentlyContinue
+                if (-not $command) {
+                    [System.Windows.MessageBox]::Show('Quick optimization is not available in the current session.', 'Quick Optimization', 'OK', 'Information') | Out-Null
+                    return
                 }
-            } else {
-                [System.Windows.MessageBox]::Show("Quick optimization is not available. Please use the main optimization features.", "Optimization", 'OK', 'Information')
+
+                Log 'Quick optimization requested from System Health dialog' 'Info'
+                $result = & $command
+                if ($result) {
+                    Log 'Quick optimization completed successfully from health dialog' 'Success'
+                } else {
+                    Log 'Quick optimization finished without backend actions' 'Warning'
+                }
+
+                & $updateDisplay -RunCheck:$false | Out-Null
+            }
+            catch {
+                Log "Quick optimization from health dialog failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Could not run quick optimization: $($_.Exception.Message)", 'Quick Optimization', 'OK', 'Error') | Out-Null
+            }
+        }.GetNewClosure())
 
         $btnOpenTaskManager.Add_Click({
-                Start-Process "taskmgr.exe" -ErrorAction Stop
-                Log "Task Manager opened from System Health dialog" 'Info'
-                Log "Error opening Task Manager: $($_.Exception.Message)" 'Warning'
-                [System.Windows.MessageBox]::Show("Could not open Task Manager: $($_.Exception.Message)", "Task Manager Error", 'OK', 'Warning')
+            param($sender, $args)
+
+            try {
+                Start-Process 'taskmgr.exe' -ErrorAction Stop
+                Log 'Task Manager opened from System Health dialog' 'Info'
             }
+            catch {
+                Log "Task Manager launch failed: $($_.Exception.Message)" 'Warning'
+                [System.Windows.MessageBox]::Show("Could not open Task Manager: $($_.Exception.Message)", 'Task Manager', 'OK', 'Warning') | Out-Null
+            }
+        }.GetNewClosure())
 
         $btnCloseHealth.Add_Click({
-            Log "System Health dialog closed by user" 'Info'
+            param($sender, $args)
+            Log 'System Health dialog closed by user' 'Info'
             $healthWindow.Close()
         })
 
-        # Initial display update using cached data (no automatic check)
-        # removed invalid call $false
-
-        # Show the window
+        & $updateDisplay -RunCheck:$false | Out-Null
         $healthWindow.ShowDialog() | Out-Null
-
-        Log "Error showing system health dialog: $($_.Exception.Message)" 'Error'
-        [System.Windows.MessageBox]::Show("Error displaying system health window: $($_.Exception.Message)", "Health Monitor Error", 'OK', 'Error')
+    }
+    catch {
+        Log "Error showing System Health dialog: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show("Error displaying system health window: $($_.Exception.Message)", 'Health Monitor', 'OK', 'Error') | Out-Null
+    }
+}
 
 function Search-LogHistory {
-    <#
-    .SYNOPSIS
-    Searches log history with advanced filtering capabilities
-    .PARAMETER SearchTerm
-    Text to search for in log messages
-    .PARAMETER Level
-    Filter by log level
-    .PARAMETER Category
-    Filter by log category
-    .PARAMETER StartDate
-    Filter logs from this date
-    .PARAMETER EndDate
-    Filter logs to this date
-    #>
     param(
-        [string]$SearchTerm = "",
+        [string]$SearchTerm = '',
         [string[]]$Level = @(),
-        [string]$Category = "All",
+        [string]$Category = 'All',
         [DateTime]$StartDate = (Get-Date).AddDays(-1),
         [DateTime]$EndDate = (Get-Date)
     )
 
+    try {
         $results = $global:LogHistory | Where-Object {
-            # Date range filter
             $_.Timestamp -ge $StartDate -and $_.Timestamp -le $EndDate
-
         }
 
-        # Search term filter
         if ($SearchTerm) {
-            $results = $results | Where-Object { $_.Message -match [regex]::Escape($SearchTerm) }
+            $regex = [regex]::Escape($SearchTerm)
+            $results = $results | Where-Object { $_.Message -match $regex }
         }
 
-        # Level filter
-        if ($Level.Count -gt 0) {
+        if ($Level -and $Level.Count -gt 0) {
             $results = $results | Where-Object { $_.Level -in $Level }
         }
 
-        # Category filter
-        if ($Category -ne "All") {
+        if ($Category -and $Category -ne 'All') {
             $results = $results | Where-Object { $_.Category -eq $Category }
         }
 
         return $results | Sort-Object Timestamp -Descending
-
+    }
+    catch {
         Log "Error searching log history: $($_.Exception.Message)" 'Error'
         return @()
-
     }
+}
 
 function Export-LogHistory {
-    <#
-    .SYNOPSIS
-    Exports log history to various formats (TXT, CSV, JSON)
-    .PARAMETER Path
-    Export file path
-    .PARAMETER Format
-    Export format (TXT, CSV, JSON)
-    .PARAMETER FilteredResults
-    Pre-filtered log entries to export
-    #>
     param(
         [string]$Path,
-        [ValidateSet("TXT", "CSV", "JSON")]
-        [string]$Format = "TXT",
+        [ValidateSet('TXT','CSV','JSON')]
+        [string]$Format = 'TXT',
         [array]$FilteredResults = $null
     )
 
+    try {
         $logsToExport = if ($FilteredResults) { $FilteredResults } else { $global:LogHistory }
-
-        if ($logsToExport.Count -eq 0) {
-            throw "No log entries to export"
-
+        if (-not $logsToExport -or $logsToExport.Count -eq 0) {
+            throw 'No log entries to export.'
         }
 
         switch ($Format) {
-            "TXT" {
+            'TXT' {
                 $content = $logsToExport | ForEach-Object {
                     "[$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))] [$($_.Level)] [$($_.Category)] $($_.Message)"
                 }
                 $content | Out-File -FilePath $Path -Encoding UTF8
             }
-            "CSV" {
-                $logsToExport | Select-Object Timestamp, Level, Category, Message, Thread | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+            'CSV' {
+                $logsToExport | Select-Object Timestamp, Level, Category, Message, Thread |
+                    Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
             }
-            "JSON" {
-                $logsToExport | ConvertTo-Json -Depth 3 | Out-File -FilePath $Path -Encoding UTF8
+            'JSON' {
+                $logsToExport | ConvertTo-Json -Depth 4 | Out-File -FilePath $Path -Encoding UTF8
             }
         }
 
-        Log "Log history exported to: $Path ($Format format, $($logsToExport.Count) entries)" 'Success'
+        Log "Log history exported to $Path as $Format" 'Success'
         return $true
-
+    }
+    catch {
         Log "Error exporting log history: $($_.Exception.Message)" 'Error'
         return $false
     }
-
-function Optimize-LogFile {
-    <#
-    .SYNOPSIS
-    Optimizes and rotates log files when they become too large
-    .PARAMETER MaxSizeMB
-    Maximum log file size in MB before rotation
-    #>
-    param([int]$MaxSizeMB = 10)
-
-        $logFilePath = Join-Path $ScriptRoot 'Koala-Activity.log'
-
-        if (Test-Path $logFilePath) {
-            $fileInfo = Get-Item $logFilePath
-            $fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
-
-            if ($fileSizeMB -gt $MaxSizeMB) {
-                # Create backup of current log
-                $backupPath = Join-Path $ScriptRoot "Koala-Activity.log.bak.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-                Copy-Item $logFilePath $backupPath -Force
-
-                # Keep only last 500 lines in main log
-                $lastLines = Get-Content $logFilePath -Tail 500
-                $lastLines | Out-File $logFilePath -Encoding UTF8
-
-                Log "Log file rotated: $fileSizeMB MB -> backup created at $backupPath" 'Info'
-
-                # Clean up old backup files (keep only 5 most recent)
-                $backupFiles = Get-ChildItem -Path $ScriptRoot -Name "Koala-Activity.log.bak.*" | Sort-Object Name -Descending
-                if ($backupFiles.Count -gt 5) {
-                    $filesToDelete = $backupFiles | Select-Object -Skip 5
-                    foreach ($file in $filesToDelete) {
-                        Remove-Item (Join-Path $ScriptRoot $file) -Force -ErrorAction SilentlyContinue
-
-                    }
-                }
-            }
-        }
-
-        Log "Error optimizing log file: $($_.Exception.Message)" 'Warning'
-    }
+}
 
 function Show-LogSearchDialog {
-    <#
-    .SYNOPSIS
-    Shows a search dialog for log history with filtering options
-    .DESCRIPTION
-    Creates a WPF dialog for advanced log searching and filtering
-    #>
-
+    try {
         [xml]$logSearchXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Log Search and Filter"
         Width="900" Height="700"
-        Background="{StaticResource AppBackgroundBrush}"
+        Background="{DynamicResource AppBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize">
 
@@ -3602,12 +3058,10 @@ function Show-LogSearchDialog {
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <!-- Header -->
     <Border Grid.Row="0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <TextBlock Text="Log Search and Filter" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" FontSize="18" HorizontalAlignment="Center"/>
     </Border>
 
-    <!-- Search Controls -->
     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <Grid>
         <Grid.RowDefinitions>
@@ -3621,24 +3075,20 @@ function Show-LogSearchDialog {
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Search Term -->
         <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,10">
           <TextBlock Text="Search Term:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,0,5"/>
           <TextBox x:Name="txtSearchTerm" Height="25" Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource CardBorderBrush}"/>
         </StackPanel>
 
-        <!-- Category Filter -->
         <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,10">
           <TextBlock Text="Category:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,0,5"/>
           <ComboBox x:Name="cmbCategory" Height="25" Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource CardBorderBrush}"/>
         </StackPanel>
 
-        <!-- Search Button -->
         <Button x:Name="btnSearch" Grid.Row="0" Grid.Column="2" Content="Search" Width="80" Height="25"
                 Background="{StaticResource CardBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0" FontWeight="SemiBold"
                 VerticalAlignment="Bottom" Margin="10,0,0,10"/>
 
-        <!-- Level Checkboxes -->
         <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
           <TextBlock Text="Levels:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,10,0" VerticalAlignment="Center"/>
           <CheckBox x:Name="chkInfo" Content="Info" Foreground="{DynamicResource PrimaryTextBrush}" IsChecked="True" Margin="0,0,15,0"/>
@@ -3648,13 +3098,11 @@ function Show-LogSearchDialog {
           <CheckBox x:Name="chkContext" Content="Context" Foreground="{DynamicResource PrimaryTextBrush}" IsChecked="False" Margin="0,0,15,0"/>
         </StackPanel>
 
-        <!-- Results Info -->
         <TextBlock x:Name="lblResultsInfo" Grid.Row="2" Grid.ColumnSpan="3"
                    Text="Total log entries: 0" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"/>
       </Grid>
     </Border>
 
-    <!-- Results List -->
     <Border Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <ListBox x:Name="lstLogResults" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11" FontFamily="Consolas">
@@ -3665,7 +3113,7 @@ function Show-LogSearchDialog {
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="{Binding Timestamp, StringFormat='yyyy-MM-dd HH:mm:ss'}" FontWeight="Bold" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
                     <TextBlock Text="{Binding Level}" FontWeight="Bold" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
-                    <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,0"/>
+                    <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{DynamicResource AccentBrush}"/>
                   </StackPanel>
                   <TextBlock Text="{Binding Message}" FontSize="11" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
@@ -3676,7 +3124,6 @@ function Show-LogSearchDialog {
       </ScrollViewer>
     </Border>
 
-    <!-- Action Buttons -->
     <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10" Margin="0,15,0,0">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
         <Button x:Name="btnExportTXT" Content="Export TXT" Width="110" Height="32" Style="{StaticResource SecondaryDialogButton}" Margin="0,0,10,0"/>
@@ -3690,12 +3137,10 @@ function Show-LogSearchDialog {
 </Window>
 '@
 
-        # Create the window
         $reader = New-Object System.Xml.XmlNodeReader $logSearchXaml
         $searchWindow = [Windows.Markup.XamlReader]::Load($reader)
         Initialize-LayoutSpacing -Root $searchWindow
 
-        # Get controls
         $txtSearchTerm = $searchWindow.FindName('txtSearchTerm')
         $cmbCategory = $searchWindow.FindName('cmbCategory')
         $btnSearch = $searchWindow.FindName('btnSearch')
@@ -3712,86 +3157,80 @@ function Show-LogSearchDialog {
         $btnClearSearch = $searchWindow.FindName('btnClearSearch')
         $btnCloseSearch = $searchWindow.FindName('btnCloseSearch')
 
-        # Initialize category dropdown
         $global:LogCategories | ForEach-Object { $cmbCategory.Items.Add($_) }
         $cmbCategory.SelectedIndex = 0
-
-        # Update results info
         $lblResultsInfo.Text = "Total log entries: $($global:LogHistory.Count)"
 
-        # Search function
         $performSearch = {
             $searchTerm = $txtSearchTerm.Text
-            $category = $cmbCategory.SelectedItem.ToString()
+            $category = if ($cmbCategory.SelectedItem) { $cmbCategory.SelectedItem.ToString() } else { 'All' }
 
             $levels = @()
-            if ($chkInfo.IsChecked) { $levels += "Info" }
-            if ($chkSuccess.IsChecked) { $levels += "Success" }
-            if ($chkWarning.IsChecked) { $levels += "Warning" }
-            if ($chkError.IsChecked) { $levels += "Error" }
-            if ($chkContext.IsChecked) { $levels += "Context" }
+            if ($chkInfo.IsChecked) { $levels += 'Info' }
+            if ($chkSuccess.IsChecked) { $levels += 'Success' }
+            if ($chkWarning.IsChecked) { $levels += 'Warning' }
+            if ($chkError.IsChecked) { $levels += 'Error' }
+            if ($chkContext.IsChecked) { $levels += 'Context' }
 
             $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-
             $lstLogResults.ItemsSource = $results
             $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
 
-            Log "Log search performed: '$searchTerm' in $category category, $($results.Count) results" 'Info'
+            Log "Log search executed: '$searchTerm' in $category ($($results.Count) results)" 'Info'
+        }.GetNewClosure()
 
-        }
+        $btnSearch.Add_Click({
+            param($sender, $args)
+            try { & $performSearch }
+            catch {
+                Log "Log search failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Search failed: $($_.Exception.Message)", 'Log Search', 'OK', 'Error') | Out-Null
+            }
+        })
 
-        # Event handlers
-$btnSearch.Add_Click({
-    try {
-        $searchTerm = $txtSearchTerm.Text
-        $category   = if ($cmbCategory.SelectedItem) { $cmbCategory.SelectedItem.Content } else { 'All' }
-        $levels = @(); if ($chkInfo.IsChecked){$levels+='Info'}; if($chkWarning.IsChecked){$levels+='Warning'}; if($chkError.IsChecked){$levels+='Error'}
-        $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-        $lstLogResults.ItemsSource = $results
-        $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
-        Log "Log search performed via button: '$searchTerm'" 'Info'
-})
-$txtSearchTerm.Add_KeyDown({
-    if ($_.Key -eq 'Return') { $btnSearch.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent)) }
-})
-        $levels = @(); if ($chkInfo.IsChecked){$levels+='Info'}; if($chkWarning.IsChecked){$levels+='Warning'}; if($chkError.IsChecked){$levels+='Error'}
-        $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-        $lstLogResults.ItemsSource = $results
-        $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
-        Log "Log search performed via button: '$searchTerm'" 'Info'
-})
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "TXT" -FilteredResults $results
+        $txtSearchTerm.Add_KeyDown({
+            param($sender, $args)
+            if ($args.Key -eq 'Return') {
+                $btnSearch.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
+            }
+        })
+
+        $btnExportTXT.Add_Click({
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'Text files (*.txt)|*.txt'
+            $dialog.Title = 'Export Log History as TXT'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'TXT' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnExportCSV.Add_Click({
-            $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
-            $saveDialog.Filter = "CSV files (*.csv)|*.csv"
-            $saveDialog.Title = "Export Log History as CSV"
-            $saveDialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
-
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "CSV" -FilteredResults $results
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'CSV files (*.csv)|*.csv'
+            $dialog.Title = 'Export Log History as CSV'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'CSV' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnExportJSON.Add_Click({
-            $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
-            $saveDialog.Filter = "JSON files (*.json)|*.json"
-            $saveDialog.Title = "Export Log History as JSON"
-            $saveDialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "JSON" -FilteredResults $results
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'JSON files (*.json)|*.json'
+            $dialog.Title = 'Export Log History as JSON'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'JSON' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnClearSearch.Add_Click({
-            $txtSearchTerm.Text = ""
+            param($sender, $args)
+            $txtSearchTerm.Text = ''
             $cmbCategory.SelectedIndex = 0
             $chkInfo.IsChecked = $true
             $chkSuccess.IsChecked = $true
@@ -3803,40 +3242,34 @@ $txtSearchTerm.Add_KeyDown({
         })
 
         $btnCloseSearch.Add_Click({
+            param($sender, $args)
             $searchWindow.Close()
         })
 
-        # Show initial results (all logs)
-        # removed invalid call
-
-        # Show the window
+        & $performSearch
         $searchWindow.ShowDialog() | Out-Null
-
+    }
+    catch {
         Log "Error showing log search dialog: $($_.Exception.Message)" 'Error'
-        [System.Windows.MessageBox]::Show("Error displaying log search window: $($_.Exception.Message)", "Log Search Error", 'OK', 'Error')
-$global:PerformanceTimer = $null
-$global:LastCpuTime = @{ Idle = 0; Kernel = 0; User = 0; Timestamp = [DateTime]::Now }
+        [System.Windows.MessageBox]::Show("Error displaying log search window: $($_.Exception.Message)", 'Log Search', 'OK', 'Error') | Out-Null
+    }
+}
 
 function Get-SystemPerformanceMetrics {
     <#
     .SYNOPSIS
-    Enhanced real-time system performance monitoring with CPU, Memory, and basic disk metrics
-    .DESCRIPTION
-    Provides comprehensive system metrics for dashboard display with efficient polling
+    Collects current CPU, memory, and activity metrics for dashboard display.
     #>
-
+    try {
         $metrics = @{}
 
-        # Get CPU Usage using existing PerfMon API
-        try {
-            $idleTime = [long]0
-            $kernelTime = [long]0
-            $userTime = [long]0
+        $idleTime = [long]0
+        $kernelTime = [long]0
+        $userTime = [long]0
+        $currentTime = [DateTime]::Now
 
-            if ([PerfMon]::GetSystemTimes([ref]$idleTime, [ref]$kernelTime, [ref]$userTime)) {
-            $currentTime = [DateTime]::Now
+        if ([PerfMon]::GetSystemTimes([ref]$idleTime, [ref]$kernelTime, [ref]$userTime)) {
             $timeDiff = ($currentTime - $global:LastCpuTime.Timestamp).TotalMilliseconds
-
             if ($timeDiff -gt 500 -and $global:LastCpuTime.Idle -gt 0) {
                 $idleDiff = $idleTime - $global:LastCpuTime.Idle
                 $kernelDiff = $kernelTime - $global:LastCpuTime.Kernel
@@ -3848,18 +3281,14 @@ function Get-SystemPerformanceMetrics {
                     $metrics.CpuUsage = [Math]::Max(0, [Math]::Min(100, $cpuUsage))
                 } else {
                     $metrics.CpuUsage = 0
-
                 }
             } else {
                 $metrics.CpuUsage = 0
             }
         } else {
             $metrics.CpuUsage = 0
-            # Safe defaults on error for Windows API performance monitoring calls
-            $metrics.CpuUsage = 0
-            Write-Verbose "CPU monitoring failed: $($_.Exception.Message)"
+        }
 
-        # Update LastCpuTime with Idle, Kernel, User times and Timestamp for accurate CPU delta calculations
         $global:LastCpuTime = @{
             Idle = $idleTime
             Kernel = $kernelTime
@@ -3867,35 +3296,22 @@ function Get-SystemPerformanceMetrics {
             Timestamp = $currentTime
         }
 
-        # Get Memory Usage using existing PerfMon API
-            $memStatus = New-Object PerfMon+MEMORYSTATUSEX
-            $memStatus.dwLength = [System.Runtime.InteropServices.Marshal]::SizeOf($memStatus)
-
-            if ([PerfMon]::GlobalMemoryStatusEx([ref]$memStatus)) {
-            # Math.Round calculations for accurate GB conversions and percentage
+        $memStatus = New-Object PerfMon+MEMORYSTATUSEX
+        $memStatus.dwLength = [System.Runtime.InteropServices.Marshal]::SizeOf($memStatus)
+        if ([PerfMon]::GlobalMemoryStatusEx([ref]$memStatus)) {
             $totalGB = [Math]::Round($memStatus.ullTotalPhys / 1GB, 1)
             $availableGB = [Math]::Round($memStatus.ullAvailPhys / 1GB, 1)
-            $usedGB = [Math]::Round($totalGB - $availableGB, 1)
-            $usagePercent = [Math]::Round($memStatus.dwMemoryLoad, 1)
-
-            $metrics.MemoryUsedGB = $usedGB
             $metrics.MemoryTotalGB = $totalGB
-            $metrics.MemoryUsagePercent = $usagePercent
-
+            $metrics.MemoryUsedGB = [Math]::Round($totalGB - $availableGB, 1)
+            $metrics.MemoryUsagePercent = [Math]::Round($memStatus.dwMemoryLoad, 1)
         } else {
-            $metrics.MemoryUsedGB = 0
             $metrics.MemoryTotalGB = 0
-            $metrics.MemoryUsagePercent = 0
-            # Safe defaults on error for memory monitoring Windows API calls
             $metrics.MemoryUsedGB = 0
-            $metrics.MemoryTotalGB = 0
             $metrics.MemoryUsagePercent = 0
-            Write-Verbose "Memory monitoring failed: $($_.Exception.Message)"
+        }
 
-        # Get Active Games Count (from existing global variable)
         $metrics.ActiveGamesCount = if ($global:ActiveGames) { $global:ActiveGames.Count } else { 0 }
 
-        # Get Last Optimization Time (from logs or global variable)
         if ($global:LastOptimizationTime) {
             $timeSince = (Get-Date) - $global:LastOptimizationTime
             if ($timeSince.Days -gt 0) {
@@ -3904,103 +3320,89 @@ function Get-SystemPerformanceMetrics {
                 $metrics.LastOptimization = "$($timeSince.Hours)h ago"
             } elseif ($timeSince.Minutes -gt 0) {
                 $metrics.LastOptimization = "$($timeSince.Minutes)m ago"
-                $metrics.LastOptimization = "Just now"
-            $metrics.LastOptimization = "Never"
+            } else {
+                $metrics.LastOptimization = 'Just now'
+            }
+        } else {
+            $metrics.LastOptimization = 'Never'
+        }
 
         return $metrics
-
-        # Return safe defaults on error
+    }
+    catch {
+        Log "Error gathering performance metrics: $($_.Exception.Message)" 'Warning'
         return @{
             CpuUsage = 0
             MemoryUsedGB = 0
             MemoryTotalGB = 0
             MemoryUsagePercent = 0
             ActiveGamesCount = 0
-            LastOptimization = "Error"
+            LastOptimization = 'Error'
         }
+    }
+}
 
 function Update-DashboardMetrics {
-    <#
-    .SYNOPSIS
-    Updates dashboard performance metrics with real-time data
-    .DESCRIPTION
-    Safely updates dashboard UI elements with current system performance data
-    #>
-
+    try {
         $metrics = Get-SystemPerformanceMetrics
 
-        # Update CPU Usage
         if ($lblDashCpuUsage) {
             $lblDashCpuUsage.Dispatcher.Invoke([Action]{
                 $lblDashCpuUsage.Text = "$($metrics.CpuUsage)%"
-
-                # Color coding based on CpuUsage and MemoryUsagePercent for dynamic metrics display
                 if ($metrics.CpuUsage -ge 80) {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#FF4444'  # Red for high
-
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#FF4444'
                 } elseif ($metrics.CpuUsage -ge 60) {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#A78BFA'  # Purple for medium load
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#A78BFA'
                 } else {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#8F6FFF'  # Accent for low load
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#8F6FFF'
                 }
             })
+        }
 
-        # Update Memory Usage
         if ($lblDashMemoryUsage) {
             $lblDashMemoryUsage.Dispatcher.Invoke([Action]{
                 $lblDashMemoryUsage.Text = "$($metrics.MemoryUsedGB) / $($metrics.MemoryTotalGB) GB"
-
-                # Color coding based on percentage
                 if ($metrics.MemoryUsagePercent -ge 85) {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#FF4444'  # Red for high
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#FF4444'
                 } elseif ($metrics.MemoryUsagePercent -ge 70) {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#A78BFA'  # Purple for medium
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#A78BFA'
                 } else {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#8F6FFF'  # Accent for normal
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#8F6FFF'
                 }
+            })
+        }
 
         if ($lblHeroProfiles) {
-            $lblHeroProfiles.Dispatcher.Invoke([Action]{
-                $lblHeroProfiles.Text = [string]$metrics.ActiveGamesCount
-            })
+            $lblHeroProfiles.Dispatcher.Invoke([Action]{ $lblHeroProfiles.Text = [string]$metrics.ActiveGamesCount })
         }
 
         $optimizationsCount = if ($global:OptimizationCache) { $global:OptimizationCache.Count } else { 0 }
         if ($lblHeroOptimizations) {
-            $lblHeroOptimizations.Dispatcher.Invoke([Action]{
-                $lblHeroOptimizations.Text = [string]$optimizationsCount
-            })
+            $lblHeroOptimizations.Dispatcher.Invoke([Action]{ $lblHeroOptimizations.Text = [string]$optimizationsCount })
         }
 
         if ($lblHeroAutoMode) {
-            $lblHeroAutoMode.Dispatcher.Invoke([Action]{
-                $lblHeroAutoMode.Text = if ($global:AutoOptimizeEnabled) { 'On' } else { 'Off' }
-            })
+            $lblHeroAutoMode.Dispatcher.Invoke([Action]{ $lblHeroAutoMode.Text = if ($global:AutoOptimizeEnabled) { 'On' } else { 'Off' } })
         }
 
-        # Update Active Games
         if ($lblDashActiveGames) {
             $lblDashActiveGames.Dispatcher.Invoke([Action]{
                 if ($metrics.ActiveGamesCount -gt 0) {
                     $lblDashActiveGames.Text = "$($metrics.ActiveGamesCount) running"
-                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#8F6FFF'  # Accent for active games
+                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#8F6FFF'
                 } else {
-                    $lblDashActiveGames.Text = "None detected"
-                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#A6AACF'  # Default color
+                    $lblDashActiveGames.Text = 'None detected'
+                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#A6AACF'
                 }
-            })
-
-        # Update Last Optimization
-        if ($lblDashLastOptimization) {
-            $lblDashLastOptimization.Dispatcher.Invoke([Action]{
-                $lblDashLastOptimization.Text = $metrics.LastOptimization
             })
         }
 
+        if ($lblDashLastOptimization) {
+            $lblDashLastOptimization.Dispatcher.Invoke([Action]{ $lblDashLastOptimization.Text = $metrics.LastOptimization })
+        }
+
         if ($lblHeaderLastRun) {
-            $lblHeaderLastRun.Dispatcher.Invoke([Action]{
-                $lblHeaderLastRun.Text = $metrics.LastOptimization
-            })
+            $lblHeaderLastRun.Dispatcher.Invoke([Action]{ $lblHeaderLastRun.Text = $metrics.LastOptimization })
         }
 
         if ($lblHeaderSystemStatus) {
@@ -4015,84 +3417,66 @@ function Update-DashboardMetrics {
                     $lblHeaderSystemStatus.Text = 'Stable'
                     Set-BrushPropertySafe -Target $lblHeaderSystemStatus -Property 'Foreground' -Value [System.Windows.Media.Brushes]::LightGreen
                 }
-
-        # Refresh System Health summary without running a full check
-        Update-SystemHealthSummary
-
-        # Silent fail to prevent UI disruption
-        Write-Verbose "Dashboard metrics update failed: $($_.Exception.Message)"
-
-function Start-PerformanceMonitoring {
-    <#
-    .SYNOPSIS
-    Starts real-time performance monitoring with configurable update interval
-    .DESCRIPTION
-    Initializes a dispatcher timer for regular dashboard updates
-    #>
-
-        if ($global:PerformanceTimer) {
-            $global:PerformanceTimer.Stop()
-
+            })
         }
 
-        # Create dispatcher timer for UI updates
+        Update-SystemHealthSummary
+    }
+    catch {
+        Write-Verbose "Dashboard metrics update failed: $($_.Exception.Message)"
+    }
+}
+
+function Start-PerformanceMonitoring {
+    try {
+        if ($global:PerformanceTimer) {
+            $global:PerformanceTimer.Stop()
+        }
+
         $global:PerformanceTimer = New-Object System.Windows.Threading.DispatcherTimer
-        $global:PerformanceTimer.Interval = [TimeSpan]::FromSeconds(3)  # Update every 3 seconds
-
-        # Set up timer event
-        $global:PerformanceTimer.Add_Tick({
-            Update-DashboardMetrics
-        })
-
-        # Start the timer
+        $global:PerformanceTimer.Interval = [TimeSpan]::FromSeconds(3)
+        $global:PerformanceTimer.Add_Tick({ Update-DashboardMetrics })
         $global:PerformanceTimer.Start()
 
-        # Initial update
         Update-DashboardMetrics
-
-        Log "Real-time performance monitoring started (3s intervals)" 'Success'
-
+        Log 'Real-time performance monitoring started (3s interval)' 'Success'
+    }
+    catch {
         Log "Error starting performance monitoring: $($_.Exception.Message)" 'Error'
     }
+}
 
 function Stop-PerformanceMonitoring {
-    <#
-    .SYNOPSIS
-    Stops the performance monitoring timer
-    #>
-
+    try {
         if ($global:PerformanceTimer) {
             $global:PerformanceTimer.Stop()
             $global:PerformanceTimer = $null
-            Log "Performance monitoring stopped" 'Info'
-
+            Log 'Performance monitoring stopped' 'Info'
         }
+    }
+    catch {
         Write-Verbose "Error stopping performance monitoring: $($_.Exception.Message)"
     }
-
-# ---------- Functions moved to top to fix call order ----------
+}
 
 function Show-ElevationMessage {
     param(
-        [string]$Title = "Administrator Privileges Required",
-        [string]$Message = "Some optimizations require administrator privileges for system-level changes.",
+        [string]$Title = 'Administrator Privileges Required',
+        [string]$Message = 'Some optimizations require administrator privileges for system-level changes.',
         [string[]]$Operations = @(),
         [switch]$ForceElevation
     )
 
-    $elevationText = $Message
+    $prompt = $Message
     if ($Operations.Count -gt 0) {
-        $elevationText += "`n`nOperations requiring elevation:"
-        $Operations | ForEach-Object { $elevationText += "`n* $_" }
+        $prompt += "`n`nOperations requiring elevation:"
+        $Operations | ForEach-Object { $prompt += "`n* $_" }
     }
 
-    $elevationText += "`n`nWould you like to:"
-    $elevationText += "`n* Yes: Restart with administrator privileges"
-    $elevationText += "`n* No: Continue with limited functionality"
-    $elevationText += "`n* Cancel: Exit application"
+    $prompt += "`n`nWould you like to:"                + "`n* Yes: Restart with administrator privileges"                + "`n* No: Continue with limited functionality"                + "`n* Cancel: Exit application"
 
     $result = [System.Windows.MessageBox]::Show(
-        $elevationText,
+        $prompt,
         "KOALA Gaming Optimizer v3.0 - $Title",
         'YesNoCancel',
         'Warning'
@@ -4100,39 +3484,38 @@ function Show-ElevationMessage {
 
     switch ($result) {
         'Yes' {
-                $scriptPath = $PSCommandPath
-                if (-not $scriptPath) {
-                    $scriptPath = Join-Path $ScriptRoot "koalafixed.ps1"
-
-                }
-
-                Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -ErrorAction Stop
-                $form.Close()
+            try {
+                $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $ScriptRoot 'koalafixed.ps1' }
+                Start-Process -FilePath 'powershell.exe' -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -ErrorAction Stop
+                if ($form) { $form.Close() }
                 return $true
+            }
+            catch {
                 Log "Failed to elevate privileges: $($_.Exception.Message)" 'Error'
                 return $false
             }
         }
         'No' {
-            Log "Running in limited mode - some optimizations will be unavailable" 'Warning'
+            Log 'Running in limited mode - some optimizations will be unavailable' 'Warning'
             return $false
         }
         'Cancel' {
-            Log "User cancelled - exiting application" 'Info'
-            $form.Close()
+            Log 'User cancelled - exiting application' 'Info'
+            if ($form) { $form.Close() }
             return $false
         }
     }
+}
 
 function Get-SystemInfo {
+    try {
         $info = @{
             OS = (Get-CimInstance Win32_OperatingSystem).Caption
             CPU = (Get-CimInstance Win32_Processor).Name
             RAM = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
-            GPU = (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notlike "*Basic*" -and $_.Name -notlike "*Generic*" }).Name -join ", "
+            GPU = (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notlike '*Basic*' -and $_.Name -notlike '*Generic*' }).Name -join ', '
             AdminRights = Test-AdminPrivileges
             PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-
         }
 
         $infoText = "System Information:`n"
@@ -4143,123 +3526,110 @@ function Get-SystemInfo {
         $infoText += "Admin Rights: $($info.AdminRights)`n"
         $infoText += "PowerShell: $($info.PowerShellVersion)"
 
-        [System.Windows.MessageBox]::Show($infoText, "System Information", 'OK', 'Information')
-
+        [System.Windows.MessageBox]::Show($infoText, 'System Information', 'OK', 'Information') | Out-Null
+    }
+    catch {
         Log "Failed to gather system info: $($_.Exception.Message)" 'Error'
     }
+}
 
 function Get-GPUVendor {
-        $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop | Where-Object {
-            $_.Name -notlike "*Basic*" -and
-            $_.Name -notlike "*Generic*" -and
-            $_.PNPDeviceID -notlike "ROOT\*"
-
-        }
-
-        $primaryGPU = $null
+    try {
+        $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop |
+            Where-Object { $_.Name -notlike '*Basic*' -and $_.Name -notlike '*Generic*' -and $_.PNPDeviceID -notlike 'ROOT\*' }
 
         foreach ($gpu in $gpus) {
-            if ($gpu -and $gpu.Name) {
-                if ($gpu.Name -match 'NVIDIA|GeForce|GTX|RTX|Quadro') {
-                    $primaryGPU = 'NVIDIA'
-                }
-                elseif ($gpu.Name -match 'AMD|RADEON|RX|FirePro') {
-                    $primaryGPU = 'AMD'
-                }
-                elseif ($gpu.Name -match 'Intel|HD Graphics|UHD Graphics|Iris') {
-                    $primaryGPU = 'Intel'
-                }
-            }
+            if ($gpu.Name -match 'NVIDIA|GeForce|GTX|RTX|Quadro') { return 'NVIDIA' }
+            if ($gpu.Name -match 'AMD|RADEON|RX|FirePro') { return 'AMD' }
+            if ($gpu.Name -match 'Intel|HD Graphics|UHD Graphics|Iris') { return 'Intel' }
         }
 
-        return if ($primaryGPU) { $primaryGPU } else { 'Other' }
         return 'Other'
     }
+    catch {
+        Log "Unable to detect GPU vendor: $($_.Exception.Message)" 'Warning'
+        return 'Other'
+    }
+}
 
 function Set-Reg {
-    param($Path,$Name,$Type='DWord',$Value,$RequiresAdmin=$false)
+    param(
+        [string]$Path,
+        [string]$Name,
+        [ValidateSet('String','ExpandString','Binary','DWord','QWord','MultiString')]
+        [string]$Type = 'DWord',
+        $Value,
+        [switch]$RequiresAdmin
+    )
 
-    # Enhanced parameter validation
     if (-not $Path -or -not $Name) {
         Log "Set-Reg: Invalid parameters - Path: '$Path', Name: '$Name'" 'Error'
         return $false
     }
 
-    # Admin privilege check
     if ($RequiresAdmin -and -not (Test-AdminPrivileges)) {
         Log "Set-Reg: Administrative privileges required for $Path\$Name" 'Warning'
         return $false
     }
 
-    # Cache optimization
     $cacheKey = "$Path\$Name"
     if ($global:RegistryCache.ContainsKey($cacheKey) -and $global:RegistryCache[$cacheKey] -eq $Value) {
-        Log "Set-Reg: Using cached value for $cacheKey" 'Info'
         return $true
     }
 
-        # Enhanced parent path creation and checking
-        $parentPaths = @()
-        $currentPath = $Path
-
-        # Build list of parent paths that need to be created
-        while ($currentPath -and -not (Test-Path $currentPath -ErrorAction SilentlyContinue)) {
-            $parentPaths += $currentPath
-            $parent = Split-Path $currentPath -Parent
-            if ($parent -eq $currentPath) { break } # Reached root
-            $currentPath = $parent
-
+    try {
+        $parent = Split-Path $Path -Parent
+        if ($parent -and -not (Test-Path $Path)) {
+            New-Item -Path $Path -Force -ErrorAction Stop | Out-Null
         }
 
-        # Create parent paths from top down
-        for ($i = $parentPaths.Count - 1; $i -ge 0; $i--) {
-            $pathToCreate = $parentPaths[$i]
-                Log "Set-Reg: Creating registry path: $pathToCreate" 'Info'
-                New-Item -Path $pathToCreate -Force -ErrorAction Stop | Out-Null
-                Log "Set-Reg: Failed to create registry path '$pathToCreate': $($_.Exception.Message)" 'Error'
-                return $false
-            }
-        }
-
-        # Verify final path exists
-        if (-not (Test-Path $Path -ErrorAction SilentlyContinue)) {
-            Log "Set-Reg: Final path verification failed for: $Path" 'Error'
-            return $false
-        }
-
-        # Set or update the registry value
-        $valueExists = $null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)
-
-        if ($valueExists) {
-            Log "Set-Reg: Updating existing value $Path\$Name = $Value" 'Info'
+        $exists = $null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)
+        if ($exists) {
             Set-ItemProperty -Path $Path -Name $Name -Value $Value -Force -ErrorAction Stop
         } else {
-            Log "Set-Reg: Creating new value $Path\$Name = $Value (Type: $Type)" 'Info'
             New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType $Type -Force -ErrorAction Stop | Out-Null
+        }
 
-        # Verify the value was set correctly
-        $verifyValue = Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
-        if ($null -ne $verifyValue -and $verifyValue.$Name -eq $Value) {
+        $verify = Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop
+        if ($null -ne $verify -and $verify.$Name -eq $Value) {
             $global:RegistryCache[$cacheKey] = $Value
-            Log "Set-Reg: Successfully set and verified $Path\$Name = $Value" 'Success'
             return $true
-        } else {
-            Log "Set-Reg: Value verification failed for $Path\$Name" 'Error'
-            return $false
+        }
 
-        Log "Set-Reg: Error setting registry value ${Path}\${Name}: $($_.Exception.Message)" 'Error'
+        Log "Set-Reg: Verification failed for $Path\$Name" 'Error'
         return $false
+    }
+    catch {
+        Log "Set-Reg: Error setting ${Path}\${Name}: $($_.Exception.Message)" 'Error'
+        return $false
+    }
+}
 
 function Get-Reg {
-    param($Path, $Name)
-        (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name
-        $null
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    try {
+        return (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name
     }
+    catch {
+        return $null
+    }
+}
 
 function Remove-Reg {
-    param($Path, $Name)
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    try {
         Remove-ItemProperty -Path $Path -Name $Name -Force -ErrorAction Stop
         return $true
+    }
+    catch {
         return $false
     }
-
+}
