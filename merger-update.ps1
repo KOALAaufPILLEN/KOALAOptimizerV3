@@ -111,7 +111,7 @@ $entryPoint = @(
 
 $allLines = [System.Collections.Generic.List[string]]::new()
 foreach ($line in $header) {
-    $allLines.Add([string]$line)
+    [void]$allLines.Add([string]$line)
 }
 
 foreach ($file in $filesToProcess) {
@@ -122,20 +122,19 @@ foreach ($file in $filesToProcess) {
         throw "Required file '$file' was not found at $modulePath."
     }
 
-    $moduleContent = Get-Content -Path $modulePath -Raw
-    $moduleLines = [System.Text.RegularExpressions.Regex]::Split($moduleContent, "`r?`n")
-    foreach ($line in $moduleLines) {
-        $allLines.Add([string]$line)
+    $moduleLines = Get-Content -Path $modulePath -Encoding UTF8
+    foreach ($line in [string[]]$moduleLines) {
+        [void]$allLines.Add($line)
     }
     $allLines.Add("#endregion ${file}")
     $allLines.Add('')
 }
 
 foreach ($line in $entryPoint) {
-    $allLines.Add([string]$line)
+    [void]$allLines.Add([string]$line)
 }
 
-$allLines | Set-Content -Path $mergedPath -Encoding UTF8
+$allLines | Set-Content -Path $mergedPath -Encoding UTF8BOM
 
 Write-Host "Merged script written to $mergedPath" -ForegroundColor Green
 
