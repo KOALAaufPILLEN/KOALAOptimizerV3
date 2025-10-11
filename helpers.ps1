@@ -193,6 +193,7 @@ function Get-ThemeColors {
         Log "Theme '$ThemeName' nicht gefunden, verwende Optimizer Dark" 'Warning'
         return Normalize-ThemeColorTable $global:ThemeDefinitions['OptimizerDark']
     }
+}
 
 function Optimize-LogFile {
     param([int]$MaxSizeMB = 10)
@@ -216,78 +217,6 @@ function Optimize-LogFile {
         }
         # Silent failure for log optimization to prevent recursion
     }
-
-function Get-SystemPerformanceMetrics {
-    param([switch]$Detailed)
-
-    try {
-        $metrics = @{
-            CPU = 0
-            Memory = 0
-            Disk = 0
-            Network = 0
-        }
-
-        try {
-            $cpu = Get-WmiObject -Class Win32_Processor | Measure-Object -Property LoadPercentage -Average
-            if ($cpu -and $cpu.Average -ne $null) {
-                $metrics.CPU = [math]::Round($cpu.Average, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve CPU metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $totalMemory = (Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory
-            $availableMemory = (Get-WmiObject -Class Win32_OperatingSystem).AvailablePhysicalMemory
-
-            if ($totalMemory -and $availableMemory) {
-                $usedMemory = $totalMemory - $availableMemory
-                $metrics.Memory = [math]::Round(($usedMemory / $totalMemory) * 100, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve memory metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $diskUsage = Get-Counter -Counter "\PhysicalDisk(_Total)\% Disk Time" -ErrorAction Stop
-            if ($diskUsage -and $diskUsage.CounterSamples) {
-                $metrics.Disk = [math]::Round($diskUsage.CounterSamples.CookedValue, 1)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve disk metrics: $($_.Exception.Message)"
-        }
-
-        try {
-            $networkUsage = Get-Counter -Counter "\Network Interface(*)\Bytes Total/sec" -ErrorAction Stop
-            if ($networkUsage -and $networkUsage.CounterSamples) {
-                $metrics.Network = [math]::Round((($networkUsage.CounterSamples | Measure-Object CookedValue -Average).Average) / 1KB, 2)
-            }
-        }
-        catch {
-            Write-Verbose "Failed to retrieve network metrics: $($_.Exception.Message)"
-        }
-
-        if ($Detailed) {
-            $metrics.Timestamp = Get-Date
-            $metrics.Source = "WMI"
-        }
-
-        return $metrics
-    }
-    catch {
-        Write-Verbose "Falling back to default system performance metrics: $($_.Exception.Message)"
-        return @{
-            CPU = 0
-            Memory = 0
-            Disk = 0
-            Network = 0
-        }
-    }
-}
 
 function Ensure-NavigationVisibility {
     param([System.Windows.Controls.Panel]$NavigationPanel)
@@ -2685,15 +2614,9 @@ function Update-SystemHealthDisplay {
 
     return $global:SystemHealthData
 
+
 function Show-SystemHealthDialog {
-    <#
-    .SYNOPSIS
-    Shows a detailed system health dialog with recommendations and actions
-    .DESCRIPTION
-    Creates a WPF dialog displaying comprehensive system health information
-    #>
-
-
+    try {
         [xml]$healthDialogXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -2721,23 +2644,17 @@ function Show-SystemHealthDialog {
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="14,6"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Foreground" Value="White"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border Background="{TemplateBinding Background}" CornerRadius="10">
-
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-
-              <Setter Property="Background" Value="#A78BFA"/>
+                <Setter Property="Background" Value="#A78BFA"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
@@ -2765,7 +2682,6 @@ function Show-SystemHealthDialog {
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <!-- Header -->
     <Border Grid.Row="0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -2784,7 +2700,6 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Metrics -->
     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -2797,7 +2712,6 @@ function Show-SystemHealthDialog {
           <TextBlock Text="CPU Usage" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" FontWeight="Bold"/>
           <TextBlock x:Name="lblCpuMetric" Text="--%" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,2,0,0"/>
         </StackPanel>
-
         <StackPanel Grid.Column="1">
           <TextBlock Text="Memory Usage" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" FontWeight="Bold"/>
           <TextBlock x:Name="lblMemoryMetric" Text="--%" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,2,0,0"/>
@@ -2809,9 +2723,7 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Issues and Recommendations -->
     <Border Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15">
-
       <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
@@ -2846,7 +2758,6 @@ function Show-SystemHealthDialog {
       </Grid>
     </Border>
 
-    <!-- Action Buttons -->
     <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10" Margin="0,15,0,0">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
         <Button x:Name="btnOptimizeNow" Content="⚡ Quick Optimize" Width="140" Height="34" Style="{StaticResource DialogButton}" Margin="0,0,10,0"/>
@@ -2858,12 +2769,10 @@ function Show-SystemHealthDialog {
 </Window>
 '@
 
-        # Create the window
         $reader = New-Object System.Xml.XmlNodeReader $healthDialogXaml
         $healthWindow = [Windows.Markup.XamlReader]::Load($reader)
         Initialize-LayoutSpacing -Root $healthWindow
 
-        # Get controls
         $lblHealthStatus = $healthWindow.FindName('lblHealthStatus')
         $lblHealthScore = $healthWindow.FindName('lblHealthScore')
         $lblCpuMetric = $healthWindow.FindName('lblCpuMetric')
@@ -2876,248 +2785,211 @@ function Show-SystemHealthDialog {
         $btnOpenTaskManager = $healthWindow.FindName('btnOpenTaskManager')
         $btnCloseHealth = $healthWindow.FindName('btnCloseHealth')
 
-        # Update display function
         $updateDisplay = {
             param([bool]$RunCheck = $false)
 
-            $data = Update-SystemHealthDisplay -RunCheck:$RunCheck
+            try {
+                $data = Update-SystemHealthDisplay -RunCheck:$RunCheck
+                if (-not $data -or -not $data.LastHealthCheck) {
+                    $lblHealthStatus.Text = 'Status: Not Run'
+                    $lblHealthScore.Text = 'Health Score: N/A'
+                    $lblCpuMetric.Text = '--%'
+                    $lblMemoryMetric.Text = '--%'
+                    if ($lblDiskMetric) { $lblDiskMetric.Text = '--%' }
+                    $lstIssues.ItemsSource = @()
+                    $lstRecommendations.ItemsSource = @('Click Refresh to run a health check.')
+                    return $null
+                }
 
-            if (-not $data.LastHealthCheck) {
-                $lblHealthStatus.Text = 'Status: Not Run'
-                $lblHealthScore.Text = 'Health Score: N/A'
-                $lblCpuMetric.Text = '--%'
-                $lblMemoryMetric.Text = '--%'
-                if ($lblDiskMetric) { $lblDiskMetric.Text = '--%' }
-                $lstIssues.ItemsSource = @()
-                $lstRecommendations.ItemsSource = @("Click Refresh to run a health check.")
-                return
+                $timestamp = $data.LastHealthCheck.ToString('g')
+                $lblHealthStatus.Text = "Status: $($data.HealthStatus) (Last: $timestamp)"
+                $lblHealthScore.Text = if ($data.HealthScore -ne $null) { "Health Score: $($data.HealthScore)%" } else { 'Health Score: N/A' }
 
+                if ($data.Metrics.ContainsKey('CpuUsage') -and $data.Metrics.CpuUsage -ne $null) {
+                    $lblCpuMetric.Text = "$($data.Metrics.CpuUsage)%"
+                } else {
+                    $lblCpuMetric.Text = '--%'
+                }
+
+                if ($data.Metrics.ContainsKey('MemoryUsage') -and $data.Metrics.MemoryUsage -ne $null) {
+                    $lblMemoryMetric.Text = "$($data.Metrics.MemoryUsage)%"
+                } else {
+                    $lblMemoryMetric.Text = '--%'
+                }
+
+                $issues = @()
+                if ($data.Issues) { $issues += $data.Issues }
+                if ($data.HealthWarnings) { $issues += $data.HealthWarnings }
+                $lstIssues.ItemsSource = $issues
+
+                if ($data.Recommendations) {
+                    $lstRecommendations.ItemsSource = $data.Recommendations
+                } else {
+                    $lstRecommendations.ItemsSource = @('No recommendations available. Great job!')
+                }
+
+                Log "System health dialog updated: $($data.HealthStatus)" 'Info'
+                return $data
             }
-
-            $timestamp = $data.LastHealthCheck.ToString('g')
-            $lblHealthStatus.Text = "Status: $($data.HealthStatus) (Last: $timestamp)"
-            if ($data.HealthScore -ne $null) {
-                $lblHealthScore.Text = "Health Score: $($data.HealthScore)%"
-            } else {
-                $lblHealthScore.Text = 'Health Score: N/A'
+            catch {
+                Log "Error updating System Health dialog: $($_.Exception.Message)" 'Error'
+                return $null
             }
+        }.GetNewClosure()
 
-            if ($data.Metrics.ContainsKey('CpuUsage') -and $data.Metrics.CpuUsage -ne $null) {
-                $lblCpuMetric.Text = "$($data.Metrics.CpuUsage)%"
-            } else {
-                $lblCpuMetric.Text = '--%'
-            }
-
-            if ($data.Metrics.ContainsKey('MemoryUsage') -and $data.Metrics.MemoryUsage -ne $null) {
-                $lblMemoryMetric.Text = "$($data.Metrics.MemoryUsage)%"
-            } else {
-                $lblMemoryMetric.Text = '--%'
-
-            # Disk metric intentionally omitted (legacy compatibility)
-
-            $issues = @()
-            if ($data.Issues) { $issues += $data.Issues }
-            if ($data.HealthWarnings) { $issues += $data.HealthWarnings }
-            $lstIssues.ItemsSource = $issues
-
-            if ($data.Recommendations) {
-                $lstRecommendations.ItemsSource = $data.Recommendations
-            } else {
-                $lstRecommendations.ItemsSource = @('No recommendations available. Great job!')
-
-            Log "System health dialog updated with cached status: $($data.HealthStatus)" 'Info'
-
-        # Event handlers
         $btnRefreshHealth.Add_Click({
-            Log "Manual health check requested from System Health dialog" 'Info'
-            # removed invalid call $true
-        })
+            param($sender, $args)
+
+            $btnRefreshHealth.IsEnabled = $false
+            try {
+                Log 'Manual health check triggered from System Health dialog' 'Info'
+                & $updateDisplay -RunCheck:$true | Out-Null
+            }
+            catch {
+                Log "Health check refresh failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Error running health check: $($_.Exception.Message)", 'Health Monitor', 'OK', 'Error') | Out-Null
+            }
+            finally {
+                $btnRefreshHealth.IsEnabled = $true
+            }
+        }.GetNewClosure())
 
         $btnOptimizeNow.Add_Click({
-            if ($btnApply) {
-                Log "Quick optimization triggered from System Health dialog" 'Info'
-                $healthWindow.Close()
+            param($sender, $args)
 
-                    $btnApply.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))
-                    Log "Error triggering optimization from health dialog: $($_.Exception.Message)" 'Error'
+            try {
+                $command = Get-Command -Name 'Invoke-QuickOptimization' -ErrorAction SilentlyContinue
+                if (-not $command) {
+                    [System.Windows.MessageBox]::Show('Quick optimization is not available in the current session.', 'Quick Optimization', 'OK', 'Information') | Out-Null
+                    return
                 }
-            } else {
-                [System.Windows.MessageBox]::Show("Quick optimization is not available. Please use the main optimization features.", "Optimization", 'OK', 'Information')
+
+                Log 'Quick optimization requested from System Health dialog' 'Info'
+                $result = & $command
+                if ($result) {
+                    Log 'Quick optimization completed successfully from health dialog' 'Success'
+                } else {
+                    Log 'Quick optimization finished without backend actions' 'Warning'
+                }
+
+                & $updateDisplay -RunCheck:$false | Out-Null
+            }
+            catch {
+                Log "Quick optimization from health dialog failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Could not run quick optimization: $($_.Exception.Message)", 'Quick Optimization', 'OK', 'Error') | Out-Null
+            }
+        }.GetNewClosure())
 
         $btnOpenTaskManager.Add_Click({
-                Start-Process "taskmgr.exe" -ErrorAction Stop
-                Log "Task Manager opened from System Health dialog" 'Info'
-                Log "Error opening Task Manager: $($_.Exception.Message)" 'Warning'
-                [System.Windows.MessageBox]::Show("Could not open Task Manager: $($_.Exception.Message)", "Task Manager Error", 'OK', 'Warning')
+            param($sender, $args)
+
+            try {
+                Start-Process 'taskmgr.exe' -ErrorAction Stop
+                Log 'Task Manager opened from System Health dialog' 'Info'
             }
+            catch {
+                Log "Task Manager launch failed: $($_.Exception.Message)" 'Warning'
+                [System.Windows.MessageBox]::Show("Could not open Task Manager: $($_.Exception.Message)", 'Task Manager', 'OK', 'Warning') | Out-Null
+            }
+        }.GetNewClosure())
 
         $btnCloseHealth.Add_Click({
-            Log "System Health dialog closed by user" 'Info'
+            param($sender, $args)
+            Log 'System Health dialog closed by user' 'Info'
             $healthWindow.Close()
         })
 
-        # Initial display update using cached data (no automatic check)
-        # removed invalid call $false
-
-        # Show the window
+        & $updateDisplay -RunCheck:$false | Out-Null
         $healthWindow.ShowDialog() | Out-Null
-
-        Log "Error showing system health dialog: $($_.Exception.Message)" 'Error'
-        [System.Windows.MessageBox]::Show("Error displaying system health window: $($_.Exception.Message)", "Health Monitor Error", 'OK', 'Error')
+    }
+    catch {
+        Log "Error showing System Health dialog: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show("Error displaying system health window: $($_.Exception.Message)", 'Health Monitor', 'OK', 'Error') | Out-Null
+    }
+}
 
 function Search-LogHistory {
-    <#
-    .SYNOPSIS
-    Searches log history with advanced filtering capabilities
-    .PARAMETER SearchTerm
-    Text to search for in log messages
-    .PARAMETER Level
-    Filter by log level
-    .PARAMETER Category
-    Filter by log category
-    .PARAMETER StartDate
-    Filter logs from this date
-    .PARAMETER EndDate
-    Filter logs to this date
-    #>
     param(
-        [string]$SearchTerm = "",
+        [string]$SearchTerm = '',
         [string[]]$Level = @(),
-        [string]$Category = "All",
+        [string]$Category = 'All',
         [DateTime]$StartDate = (Get-Date).AddDays(-1),
         [DateTime]$EndDate = (Get-Date)
     )
 
+    try {
         $results = $global:LogHistory | Where-Object {
-            # Date range filter
             $_.Timestamp -ge $StartDate -and $_.Timestamp -le $EndDate
-
         }
 
-        # Search term filter
         if ($SearchTerm) {
-            $results = $results | Where-Object { $_.Message -match [regex]::Escape($SearchTerm) }
+            $regex = [regex]::Escape($SearchTerm)
+            $results = $results | Where-Object { $_.Message -match $regex }
         }
 
-        # Level filter
-        if ($Level.Count -gt 0) {
+        if ($Level -and $Level.Count -gt 0) {
             $results = $results | Where-Object { $_.Level -in $Level }
         }
 
-        # Category filter
-        if ($Category -ne "All") {
+        if ($Category -and $Category -ne 'All') {
             $results = $results | Where-Object { $_.Category -eq $Category }
         }
 
         return $results | Sort-Object Timestamp -Descending
-
+    }
+    catch {
         Log "Error searching log history: $($_.Exception.Message)" 'Error'
         return @()
-
     }
+}
 
 function Export-LogHistory {
-    <#
-    .SYNOPSIS
-    Exports log history to various formats (TXT, CSV, JSON)
-    .PARAMETER Path
-    Export file path
-    .PARAMETER Format
-    Export format (TXT, CSV, JSON)
-    .PARAMETER FilteredResults
-    Pre-filtered log entries to export
-    #>
     param(
         [string]$Path,
-        [ValidateSet("TXT", "CSV", "JSON")]
-        [string]$Format = "TXT",
+        [ValidateSet('TXT','CSV','JSON')]
+        [string]$Format = 'TXT',
         [array]$FilteredResults = $null
     )
 
+    try {
         $logsToExport = if ($FilteredResults) { $FilteredResults } else { $global:LogHistory }
-
-        if ($logsToExport.Count -eq 0) {
-            throw "No log entries to export"
-
+        if (-not $logsToExport -or $logsToExport.Count -eq 0) {
+            throw 'No log entries to export.'
         }
 
         switch ($Format) {
-            "TXT" {
+            'TXT' {
                 $content = $logsToExport | ForEach-Object {
                     "[$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))] [$($_.Level)] [$($_.Category)] $($_.Message)"
                 }
                 $content | Out-File -FilePath $Path -Encoding UTF8
             }
-            "CSV" {
-                $logsToExport | Select-Object Timestamp, Level, Category, Message, Thread | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+            'CSV' {
+                $logsToExport | Select-Object Timestamp, Level, Category, Message, Thread |
+                    Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
             }
-            "JSON" {
-                $logsToExport | ConvertTo-Json -Depth 3 | Out-File -FilePath $Path -Encoding UTF8
+            'JSON' {
+                $logsToExport | ConvertTo-Json -Depth 4 | Out-File -FilePath $Path -Encoding UTF8
             }
         }
 
-        Log "Log history exported to: $Path ($Format format, $($logsToExport.Count) entries)" 'Success'
+        Log "Log history exported to $Path as $Format" 'Success'
         return $true
-
+    }
+    catch {
         Log "Error exporting log history: $($_.Exception.Message)" 'Error'
         return $false
     }
-
-function Optimize-LogFile {
-    <#
-    .SYNOPSIS
-    Optimizes and rotates log files when they become too large
-    .PARAMETER MaxSizeMB
-    Maximum log file size in MB before rotation
-    #>
-    param([int]$MaxSizeMB = 10)
-
-        $logFilePath = Join-Path $ScriptRoot 'Koala-Activity.log'
-
-        if (Test-Path $logFilePath) {
-            $fileInfo = Get-Item $logFilePath
-            $fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
-
-            if ($fileSizeMB -gt $MaxSizeMB) {
-                # Create backup of current log
-                $backupPath = Join-Path $ScriptRoot "Koala-Activity.log.bak.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-                Copy-Item $logFilePath $backupPath -Force
-
-                # Keep only last 500 lines in main log
-                $lastLines = Get-Content $logFilePath -Tail 500
-                $lastLines | Out-File $logFilePath -Encoding UTF8
-
-                Log "Log file rotated: $fileSizeMB MB -> backup created at $backupPath" 'Info'
-
-                # Clean up old backup files (keep only 5 most recent)
-                $backupFiles = Get-ChildItem -Path $ScriptRoot -Name "Koala-Activity.log.bak.*" | Sort-Object Name -Descending
-                if ($backupFiles.Count -gt 5) {
-                    $filesToDelete = $backupFiles | Select-Object -Skip 5
-                    foreach ($file in $filesToDelete) {
-                        Remove-Item (Join-Path $ScriptRoot $file) -Force -ErrorAction SilentlyContinue
-
-                    }
-                }
-            }
-        }
-
-        Log "Error optimizing log file: $($_.Exception.Message)" 'Warning'
-    }
+}
 
 function Show-LogSearchDialog {
-    <#
-    .SYNOPSIS
-    Shows a search dialog for log history with filtering options
-    .DESCRIPTION
-    Creates a WPF dialog for advanced log searching and filtering
-    #>
-
+    try {
         [xml]$logSearchXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Log Search and Filter"
         Width="900" Height="700"
-        Background="{StaticResource AppBackgroundBrush}"
+        Background="{DynamicResource AppBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize">
 
@@ -3186,12 +3058,10 @@ function Show-LogSearchDialog {
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <!-- Header -->
     <Border Grid.Row="0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <TextBlock Text="Log Search and Filter" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" FontSize="18" HorizontalAlignment="Center"/>
     </Border>
 
-    <!-- Search Controls -->
     <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="15" Margin="0,0,0,15">
       <Grid>
         <Grid.RowDefinitions>
@@ -3205,24 +3075,20 @@ function Show-LogSearchDialog {
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Search Term -->
         <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,10">
           <TextBlock Text="Search Term:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,0,5"/>
           <TextBox x:Name="txtSearchTerm" Height="25" Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource CardBorderBrush}"/>
         </StackPanel>
 
-        <!-- Category Filter -->
         <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,10">
           <TextBlock Text="Category:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,0,5"/>
           <ComboBox x:Name="cmbCategory" Height="25" Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderBrush="{DynamicResource CardBorderBrush}"/>
         </StackPanel>
 
-        <!-- Search Button -->
         <Button x:Name="btnSearch" Grid.Row="0" Grid.Column="2" Content="Search" Width="80" Height="25"
                 Background="{StaticResource CardBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0" FontWeight="SemiBold"
                 VerticalAlignment="Bottom" Margin="10,0,0,10"/>
 
-        <!-- Level Checkboxes -->
         <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
           <TextBlock Text="Levels:" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" Margin="0,0,10,0" VerticalAlignment="Center"/>
           <CheckBox x:Name="chkInfo" Content="Info" Foreground="{DynamicResource PrimaryTextBrush}" IsChecked="True" Margin="0,0,15,0"/>
@@ -3232,13 +3098,11 @@ function Show-LogSearchDialog {
           <CheckBox x:Name="chkContext" Content="Context" Foreground="{DynamicResource PrimaryTextBrush}" IsChecked="False" Margin="0,0,15,0"/>
         </StackPanel>
 
-        <!-- Results Info -->
         <TextBlock x:Name="lblResultsInfo" Grid.Row="2" Grid.ColumnSpan="3"
                    Text="Total log entries: 0" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11"/>
       </Grid>
     </Border>
 
-    <!-- Results List -->
     <Border Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <ListBox x:Name="lstLogResults" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11" FontFamily="Consolas">
@@ -3249,7 +3113,7 @@ function Show-LogSearchDialog {
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="{Binding Timestamp, StringFormat='yyyy-MM-dd HH:mm:ss'}" FontWeight="Bold" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
                     <TextBlock Text="{Binding Level}" FontWeight="Bold" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
-                    <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,0"/>
+                    <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{DynamicResource AccentBrush}"/>
                   </StackPanel>
                   <TextBlock Text="{Binding Message}" FontSize="11" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
@@ -3260,7 +3124,6 @@ function Show-LogSearchDialog {
       </ScrollViewer>
     </Border>
 
-    <!-- Action Buttons -->
     <Border Grid.Row="3" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="2" CornerRadius="8" Padding="10" Margin="0,15,0,0">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
         <Button x:Name="btnExportTXT" Content="Export TXT" Width="110" Height="32" Style="{StaticResource SecondaryDialogButton}" Margin="0,0,10,0"/>
@@ -3274,12 +3137,10 @@ function Show-LogSearchDialog {
 </Window>
 '@
 
-        # Create the window
         $reader = New-Object System.Xml.XmlNodeReader $logSearchXaml
         $searchWindow = [Windows.Markup.XamlReader]::Load($reader)
         Initialize-LayoutSpacing -Root $searchWindow
 
-        # Get controls
         $txtSearchTerm = $searchWindow.FindName('txtSearchTerm')
         $cmbCategory = $searchWindow.FindName('cmbCategory')
         $btnSearch = $searchWindow.FindName('btnSearch')
@@ -3296,86 +3157,80 @@ function Show-LogSearchDialog {
         $btnClearSearch = $searchWindow.FindName('btnClearSearch')
         $btnCloseSearch = $searchWindow.FindName('btnCloseSearch')
 
-        # Initialize category dropdown
         $global:LogCategories | ForEach-Object { $cmbCategory.Items.Add($_) }
         $cmbCategory.SelectedIndex = 0
-
-        # Update results info
         $lblResultsInfo.Text = "Total log entries: $($global:LogHistory.Count)"
 
-        # Search function
         $performSearch = {
             $searchTerm = $txtSearchTerm.Text
-            $category = $cmbCategory.SelectedItem.ToString()
+            $category = if ($cmbCategory.SelectedItem) { $cmbCategory.SelectedItem.ToString() } else { 'All' }
 
             $levels = @()
-            if ($chkInfo.IsChecked) { $levels += "Info" }
-            if ($chkSuccess.IsChecked) { $levels += "Success" }
-            if ($chkWarning.IsChecked) { $levels += "Warning" }
-            if ($chkError.IsChecked) { $levels += "Error" }
-            if ($chkContext.IsChecked) { $levels += "Context" }
+            if ($chkInfo.IsChecked) { $levels += 'Info' }
+            if ($chkSuccess.IsChecked) { $levels += 'Success' }
+            if ($chkWarning.IsChecked) { $levels += 'Warning' }
+            if ($chkError.IsChecked) { $levels += 'Error' }
+            if ($chkContext.IsChecked) { $levels += 'Context' }
 
             $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-
             $lstLogResults.ItemsSource = $results
             $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
 
-            Log "Log search performed: '$searchTerm' in $category category, $($results.Count) results" 'Info'
+            Log "Log search executed: '$searchTerm' in $category ($($results.Count) results)" 'Info'
+        }.GetNewClosure()
 
-        }
+        $btnSearch.Add_Click({
+            param($sender, $args)
+            try { & $performSearch }
+            catch {
+                Log "Log search failed: $($_.Exception.Message)" 'Error'
+                [System.Windows.MessageBox]::Show("Search failed: $($_.Exception.Message)", 'Log Search', 'OK', 'Error') | Out-Null
+            }
+        })
 
-        # Event handlers
-$btnSearch.Add_Click({
-    try {
-        $searchTerm = $txtSearchTerm.Text
-        $category   = if ($cmbCategory.SelectedItem) { $cmbCategory.SelectedItem.Content } else { 'All' }
-        $levels = @(); if ($chkInfo.IsChecked){$levels+='Info'}; if($chkWarning.IsChecked){$levels+='Warning'}; if($chkError.IsChecked){$levels+='Error'}
-        $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-        $lstLogResults.ItemsSource = $results
-        $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
-        Log "Log search performed via button: '$searchTerm'" 'Info'
-})
-$txtSearchTerm.Add_KeyDown({
-    if ($_.Key -eq 'Return') { $btnSearch.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent)) }
-})
-        $levels = @(); if ($chkInfo.IsChecked){$levels+='Info'}; if($chkWarning.IsChecked){$levels+='Warning'}; if($chkError.IsChecked){$levels+='Error'}
-        $results = Search-LogHistory -SearchTerm $searchTerm -Level $levels -Category $category
-        $lstLogResults.ItemsSource = $results
-        $lblResultsInfo.Text = "Search results: $($results.Count) entries (Total: $($global:LogHistory.Count))"
-        Log "Log search performed via button: '$searchTerm'" 'Info'
-})
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "TXT" -FilteredResults $results
+        $txtSearchTerm.Add_KeyDown({
+            param($sender, $args)
+            if ($args.Key -eq 'Return') {
+                $btnSearch.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
+            }
+        })
+
+        $btnExportTXT.Add_Click({
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'Text files (*.txt)|*.txt'
+            $dialog.Title = 'Export Log History as TXT'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'TXT' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnExportCSV.Add_Click({
-            $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
-            $saveDialog.Filter = "CSV files (*.csv)|*.csv"
-            $saveDialog.Title = "Export Log History as CSV"
-            $saveDialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
-
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "CSV" -FilteredResults $results
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'CSV files (*.csv)|*.csv'
+            $dialog.Title = 'Export Log History as CSV'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'CSV' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnExportJSON.Add_Click({
-            $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
-            $saveDialog.Filter = "JSON files (*.json)|*.json"
-            $saveDialog.Title = "Export Log History as JSON"
-            $saveDialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-
-            if ($saveDialog.ShowDialog()) {
-                $results = $lstLogResults.ItemsSource
-                Export-LogHistory -Path $saveDialog.FileName -Format "JSON" -FilteredResults $results
+            param($sender, $args)
+            $dialog = New-Object Microsoft.Win32.SaveFileDialog
+            $dialog.Filter = 'JSON files (*.json)|*.json'
+            $dialog.Title = 'Export Log History as JSON'
+            $dialog.FileName = "KOALA-GameOptimizer-Logs-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+            if ($dialog.ShowDialog()) {
+                Export-LogHistory -Path $dialog.FileName -Format 'JSON' -FilteredResults $lstLogResults.ItemsSource | Out-Null
             }
         })
 
         $btnClearSearch.Add_Click({
-            $txtSearchTerm.Text = ""
+            param($sender, $args)
+            $txtSearchTerm.Text = ''
             $cmbCategory.SelectedIndex = 0
             $chkInfo.IsChecked = $true
             $chkSuccess.IsChecked = $true
@@ -3387,40 +3242,34 @@ $txtSearchTerm.Add_KeyDown({
         })
 
         $btnCloseSearch.Add_Click({
+            param($sender, $args)
             $searchWindow.Close()
         })
 
-        # Show initial results (all logs)
-        # removed invalid call
-
-        # Show the window
+        & $performSearch
         $searchWindow.ShowDialog() | Out-Null
-
+    }
+    catch {
         Log "Error showing log search dialog: $($_.Exception.Message)" 'Error'
-        [System.Windows.MessageBox]::Show("Error displaying log search window: $($_.Exception.Message)", "Log Search Error", 'OK', 'Error')
-$global:PerformanceTimer = $null
-$global:LastCpuTime = @{ Idle = 0; Kernel = 0; User = 0; Timestamp = [DateTime]::Now }
+        [System.Windows.MessageBox]::Show("Error displaying log search window: $($_.Exception.Message)", 'Log Search', 'OK', 'Error') | Out-Null
+    }
+}
 
 function Get-SystemPerformanceMetrics {
     <#
     .SYNOPSIS
-    Enhanced real-time system performance monitoring with CPU, Memory, and basic disk metrics
-    .DESCRIPTION
-    Provides comprehensive system metrics for dashboard display with efficient polling
+    Collects current CPU, memory, and activity metrics for dashboard display.
     #>
-
+    try {
         $metrics = @{}
 
-        # Get CPU Usage using existing PerfMon API
-        try {
-            $idleTime = [long]0
-            $kernelTime = [long]0
-            $userTime = [long]0
+        $idleTime = [long]0
+        $kernelTime = [long]0
+        $userTime = [long]0
+        $currentTime = [DateTime]::Now
 
-            if ([PerfMon]::GetSystemTimes([ref]$idleTime, [ref]$kernelTime, [ref]$userTime)) {
-            $currentTime = [DateTime]::Now
+        if ([PerfMon]::GetSystemTimes([ref]$idleTime, [ref]$kernelTime, [ref]$userTime)) {
             $timeDiff = ($currentTime - $global:LastCpuTime.Timestamp).TotalMilliseconds
-
             if ($timeDiff -gt 500 -and $global:LastCpuTime.Idle -gt 0) {
                 $idleDiff = $idleTime - $global:LastCpuTime.Idle
                 $kernelDiff = $kernelTime - $global:LastCpuTime.Kernel
@@ -3432,18 +3281,14 @@ function Get-SystemPerformanceMetrics {
                     $metrics.CpuUsage = [Math]::Max(0, [Math]::Min(100, $cpuUsage))
                 } else {
                     $metrics.CpuUsage = 0
-
                 }
             } else {
                 $metrics.CpuUsage = 0
             }
         } else {
             $metrics.CpuUsage = 0
-            # Safe defaults on error for Windows API performance monitoring calls
-            $metrics.CpuUsage = 0
-            Write-Verbose "CPU monitoring failed: $($_.Exception.Message)"
+        }
 
-        # Update LastCpuTime with Idle, Kernel, User times and Timestamp for accurate CPU delta calculations
         $global:LastCpuTime = @{
             Idle = $idleTime
             Kernel = $kernelTime
@@ -3451,35 +3296,22 @@ function Get-SystemPerformanceMetrics {
             Timestamp = $currentTime
         }
 
-        # Get Memory Usage using existing PerfMon API
-            $memStatus = New-Object PerfMon+MEMORYSTATUSEX
-            $memStatus.dwLength = [System.Runtime.InteropServices.Marshal]::SizeOf($memStatus)
-
-            if ([PerfMon]::GlobalMemoryStatusEx([ref]$memStatus)) {
-            # Math.Round calculations for accurate GB conversions and percentage
+        $memStatus = New-Object PerfMon+MEMORYSTATUSEX
+        $memStatus.dwLength = [System.Runtime.InteropServices.Marshal]::SizeOf($memStatus)
+        if ([PerfMon]::GlobalMemoryStatusEx([ref]$memStatus)) {
             $totalGB = [Math]::Round($memStatus.ullTotalPhys / 1GB, 1)
             $availableGB = [Math]::Round($memStatus.ullAvailPhys / 1GB, 1)
-            $usedGB = [Math]::Round($totalGB - $availableGB, 1)
-            $usagePercent = [Math]::Round($memStatus.dwMemoryLoad, 1)
-
-            $metrics.MemoryUsedGB = $usedGB
             $metrics.MemoryTotalGB = $totalGB
-            $metrics.MemoryUsagePercent = $usagePercent
-
+            $metrics.MemoryUsedGB = [Math]::Round($totalGB - $availableGB, 1)
+            $metrics.MemoryUsagePercent = [Math]::Round($memStatus.dwMemoryLoad, 1)
         } else {
-            $metrics.MemoryUsedGB = 0
             $metrics.MemoryTotalGB = 0
-            $metrics.MemoryUsagePercent = 0
-            # Safe defaults on error for memory monitoring Windows API calls
             $metrics.MemoryUsedGB = 0
-            $metrics.MemoryTotalGB = 0
             $metrics.MemoryUsagePercent = 0
-            Write-Verbose "Memory monitoring failed: $($_.Exception.Message)"
+        }
 
-        # Get Active Games Count (from existing global variable)
         $metrics.ActiveGamesCount = if ($global:ActiveGames) { $global:ActiveGames.Count } else { 0 }
 
-        # Get Last Optimization Time (from logs or global variable)
         if ($global:LastOptimizationTime) {
             $timeSince = (Get-Date) - $global:LastOptimizationTime
             if ($timeSince.Days -gt 0) {
@@ -3488,103 +3320,89 @@ function Get-SystemPerformanceMetrics {
                 $metrics.LastOptimization = "$($timeSince.Hours)h ago"
             } elseif ($timeSince.Minutes -gt 0) {
                 $metrics.LastOptimization = "$($timeSince.Minutes)m ago"
-                $metrics.LastOptimization = "Just now"
-            $metrics.LastOptimization = "Never"
+            } else {
+                $metrics.LastOptimization = 'Just now'
+            }
+        } else {
+            $metrics.LastOptimization = 'Never'
+        }
 
         return $metrics
-
-        # Return safe defaults on error
+    }
+    catch {
+        Log "Error gathering performance metrics: $($_.Exception.Message)" 'Warning'
         return @{
             CpuUsage = 0
             MemoryUsedGB = 0
             MemoryTotalGB = 0
             MemoryUsagePercent = 0
             ActiveGamesCount = 0
-            LastOptimization = "Error"
+            LastOptimization = 'Error'
         }
+    }
+}
 
 function Update-DashboardMetrics {
-    <#
-    .SYNOPSIS
-    Updates dashboard performance metrics with real-time data
-    .DESCRIPTION
-    Safely updates dashboard UI elements with current system performance data
-    #>
-
+    try {
         $metrics = Get-SystemPerformanceMetrics
 
-        # Update CPU Usage
         if ($lblDashCpuUsage) {
             $lblDashCpuUsage.Dispatcher.Invoke([Action]{
                 $lblDashCpuUsage.Text = "$($metrics.CpuUsage)%"
-
-                # Color coding based on CpuUsage and MemoryUsagePercent for dynamic metrics display
                 if ($metrics.CpuUsage -ge 80) {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#FF4444'  # Red for high
-
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#FF4444'
                 } elseif ($metrics.CpuUsage -ge 60) {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#A78BFA'  # Purple for medium load
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#A78BFA'
                 } else {
-                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#8F6FFF'  # Accent for low load
+                    Set-BrushPropertySafe -Target $lblDashCpuUsage -Property 'Foreground' -Value '#8F6FFF'
                 }
             })
+        }
 
-        # Update Memory Usage
         if ($lblDashMemoryUsage) {
             $lblDashMemoryUsage.Dispatcher.Invoke([Action]{
                 $lblDashMemoryUsage.Text = "$($metrics.MemoryUsedGB) / $($metrics.MemoryTotalGB) GB"
-
-                # Color coding based on percentage
                 if ($metrics.MemoryUsagePercent -ge 85) {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#FF4444'  # Red for high
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#FF4444'
                 } elseif ($metrics.MemoryUsagePercent -ge 70) {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#A78BFA'  # Purple for medium
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#A78BFA'
                 } else {
-                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#8F6FFF'  # Accent for normal
+                    Set-BrushPropertySafe -Target $lblDashMemoryUsage -Property 'Foreground' -Value '#8F6FFF'
                 }
+            })
+        }
 
         if ($lblHeroProfiles) {
-            $lblHeroProfiles.Dispatcher.Invoke([Action]{
-                $lblHeroProfiles.Text = [string]$metrics.ActiveGamesCount
-            })
+            $lblHeroProfiles.Dispatcher.Invoke([Action]{ $lblHeroProfiles.Text = [string]$metrics.ActiveGamesCount })
         }
 
         $optimizationsCount = if ($global:OptimizationCache) { $global:OptimizationCache.Count } else { 0 }
         if ($lblHeroOptimizations) {
-            $lblHeroOptimizations.Dispatcher.Invoke([Action]{
-                $lblHeroOptimizations.Text = [string]$optimizationsCount
-            })
+            $lblHeroOptimizations.Dispatcher.Invoke([Action]{ $lblHeroOptimizations.Text = [string]$optimizationsCount })
         }
 
         if ($lblHeroAutoMode) {
-            $lblHeroAutoMode.Dispatcher.Invoke([Action]{
-                $lblHeroAutoMode.Text = if ($global:AutoOptimizeEnabled) { 'On' } else { 'Off' }
-            })
+            $lblHeroAutoMode.Dispatcher.Invoke([Action]{ $lblHeroAutoMode.Text = if ($global:AutoOptimizeEnabled) { 'On' } else { 'Off' } })
         }
 
-        # Update Active Games
         if ($lblDashActiveGames) {
             $lblDashActiveGames.Dispatcher.Invoke([Action]{
                 if ($metrics.ActiveGamesCount -gt 0) {
                     $lblDashActiveGames.Text = "$($metrics.ActiveGamesCount) running"
-                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#8F6FFF'  # Accent for active games
+                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#8F6FFF'
                 } else {
-                    $lblDashActiveGames.Text = "None detected"
-                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#A6AACF'  # Default color
+                    $lblDashActiveGames.Text = 'None detected'
+                    Set-BrushPropertySafe -Target $lblDashActiveGames -Property 'Foreground' -Value '#A6AACF'
                 }
-            })
-
-        # Update Last Optimization
-        if ($lblDashLastOptimization) {
-            $lblDashLastOptimization.Dispatcher.Invoke([Action]{
-                $lblDashLastOptimization.Text = $metrics.LastOptimization
             })
         }
 
+        if ($lblDashLastOptimization) {
+            $lblDashLastOptimization.Dispatcher.Invoke([Action]{ $lblDashLastOptimization.Text = $metrics.LastOptimization })
+        }
+
         if ($lblHeaderLastRun) {
-            $lblHeaderLastRun.Dispatcher.Invoke([Action]{
-                $lblHeaderLastRun.Text = $metrics.LastOptimization
-            })
+            $lblHeaderLastRun.Dispatcher.Invoke([Action]{ $lblHeaderLastRun.Text = $metrics.LastOptimization })
         }
 
         if ($lblHeaderSystemStatus) {
@@ -3599,84 +3417,66 @@ function Update-DashboardMetrics {
                     $lblHeaderSystemStatus.Text = 'Stable'
                     Set-BrushPropertySafe -Target $lblHeaderSystemStatus -Property 'Foreground' -Value [System.Windows.Media.Brushes]::LightGreen
                 }
-
-        # Refresh System Health summary without running a full check
-        Update-SystemHealthSummary
-
-        # Silent fail to prevent UI disruption
-        Write-Verbose "Dashboard metrics update failed: $($_.Exception.Message)"
-
-function Start-PerformanceMonitoring {
-    <#
-    .SYNOPSIS
-    Starts real-time performance monitoring with configurable update interval
-    .DESCRIPTION
-    Initializes a dispatcher timer for regular dashboard updates
-    #>
-
-        if ($global:PerformanceTimer) {
-            $global:PerformanceTimer.Stop()
-
+            })
         }
 
-        # Create dispatcher timer for UI updates
+        Update-SystemHealthSummary
+    }
+    catch {
+        Write-Verbose "Dashboard metrics update failed: $($_.Exception.Message)"
+    }
+}
+
+function Start-PerformanceMonitoring {
+    try {
+        if ($global:PerformanceTimer) {
+            $global:PerformanceTimer.Stop()
+        }
+
         $global:PerformanceTimer = New-Object System.Windows.Threading.DispatcherTimer
-        $global:PerformanceTimer.Interval = [TimeSpan]::FromSeconds(3)  # Update every 3 seconds
-
-        # Set up timer event
-        $global:PerformanceTimer.Add_Tick({
-            Update-DashboardMetrics
-        })
-
-        # Start the timer
+        $global:PerformanceTimer.Interval = [TimeSpan]::FromSeconds(3)
+        $global:PerformanceTimer.Add_Tick({ Update-DashboardMetrics })
         $global:PerformanceTimer.Start()
 
-        # Initial update
         Update-DashboardMetrics
-
-        Log "Real-time performance monitoring started (3s intervals)" 'Success'
-
+        Log 'Real-time performance monitoring started (3s interval)' 'Success'
+    }
+    catch {
         Log "Error starting performance monitoring: $($_.Exception.Message)" 'Error'
     }
+}
 
 function Stop-PerformanceMonitoring {
-    <#
-    .SYNOPSIS
-    Stops the performance monitoring timer
-    #>
-
+    try {
         if ($global:PerformanceTimer) {
             $global:PerformanceTimer.Stop()
             $global:PerformanceTimer = $null
-            Log "Performance monitoring stopped" 'Info'
-
+            Log 'Performance monitoring stopped' 'Info'
         }
+    }
+    catch {
         Write-Verbose "Error stopping performance monitoring: $($_.Exception.Message)"
     }
-
-# ---------- Functions moved to top to fix call order ----------
+}
 
 function Show-ElevationMessage {
     param(
-        [string]$Title = "Administrator Privileges Required",
-        [string]$Message = "Some optimizations require administrator privileges for system-level changes.",
+        [string]$Title = 'Administrator Privileges Required',
+        [string]$Message = 'Some optimizations require administrator privileges for system-level changes.',
         [string[]]$Operations = @(),
         [switch]$ForceElevation
     )
 
-    $elevationText = $Message
+    $prompt = $Message
     if ($Operations.Count -gt 0) {
-        $elevationText += "`n`nOperations requiring elevation:"
-        $Operations | ForEach-Object { $elevationText += "`n* $_" }
+        $prompt += "`n`nOperations requiring elevation:"
+        $Operations | ForEach-Object { $prompt += "`n* $_" }
     }
 
-    $elevationText += "`n`nWould you like to:"
-    $elevationText += "`n* Yes: Restart with administrator privileges"
-    $elevationText += "`n* No: Continue with limited functionality"
-    $elevationText += "`n* Cancel: Exit application"
+    $prompt += "`n`nWould you like to:"                + "`n* Yes: Restart with administrator privileges"                + "`n* No: Continue with limited functionality"                + "`n* Cancel: Exit application"
 
     $result = [System.Windows.MessageBox]::Show(
-        $elevationText,
+        $prompt,
         "KOALA Gaming Optimizer v3.0 - $Title",
         'YesNoCancel',
         'Warning'
@@ -3684,39 +3484,38 @@ function Show-ElevationMessage {
 
     switch ($result) {
         'Yes' {
-                $scriptPath = $PSCommandPath
-                if (-not $scriptPath) {
-                    $scriptPath = Join-Path $ScriptRoot "koalafixed.ps1"
-
-                }
-
-                Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -ErrorAction Stop
-                $form.Close()
+            try {
+                $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $ScriptRoot 'koalafixed.ps1' }
+                Start-Process -FilePath 'powershell.exe' -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -ErrorAction Stop
+                if ($form) { $form.Close() }
                 return $true
+            }
+            catch {
                 Log "Failed to elevate privileges: $($_.Exception.Message)" 'Error'
                 return $false
             }
         }
         'No' {
-            Log "Running in limited mode - some optimizations will be unavailable" 'Warning'
+            Log 'Running in limited mode - some optimizations will be unavailable' 'Warning'
             return $false
         }
         'Cancel' {
-            Log "User cancelled - exiting application" 'Info'
-            $form.Close()
+            Log 'User cancelled - exiting application' 'Info'
+            if ($form) { $form.Close() }
             return $false
         }
     }
+}
 
 function Get-SystemInfo {
+    try {
         $info = @{
             OS = (Get-CimInstance Win32_OperatingSystem).Caption
             CPU = (Get-CimInstance Win32_Processor).Name
             RAM = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
-            GPU = (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notlike "*Basic*" -and $_.Name -notlike "*Generic*" }).Name -join ", "
+            GPU = (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notlike '*Basic*' -and $_.Name -notlike '*Generic*' }).Name -join ', '
             AdminRights = Test-AdminPrivileges
             PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-
         }
 
         $infoText = "System Information:`n"
@@ -3727,123 +3526,110 @@ function Get-SystemInfo {
         $infoText += "Admin Rights: $($info.AdminRights)`n"
         $infoText += "PowerShell: $($info.PowerShellVersion)"
 
-        [System.Windows.MessageBox]::Show($infoText, "System Information", 'OK', 'Information')
-
+        [System.Windows.MessageBox]::Show($infoText, 'System Information', 'OK', 'Information') | Out-Null
+    }
+    catch {
         Log "Failed to gather system info: $($_.Exception.Message)" 'Error'
     }
+}
 
 function Get-GPUVendor {
-        $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop | Where-Object {
-            $_.Name -notlike "*Basic*" -and
-            $_.Name -notlike "*Generic*" -and
-            $_.PNPDeviceID -notlike "ROOT\*"
-
-        }
-
-        $primaryGPU = $null
+    try {
+        $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop |
+            Where-Object { $_.Name -notlike '*Basic*' -and $_.Name -notlike '*Generic*' -and $_.PNPDeviceID -notlike 'ROOT\*' }
 
         foreach ($gpu in $gpus) {
-            if ($gpu -and $gpu.Name) {
-                if ($gpu.Name -match 'NVIDIA|GeForce|GTX|RTX|Quadro') {
-                    $primaryGPU = 'NVIDIA'
-                }
-                elseif ($gpu.Name -match 'AMD|RADEON|RX|FirePro') {
-                    $primaryGPU = 'AMD'
-                }
-                elseif ($gpu.Name -match 'Intel|HD Graphics|UHD Graphics|Iris') {
-                    $primaryGPU = 'Intel'
-                }
-            }
+            if ($gpu.Name -match 'NVIDIA|GeForce|GTX|RTX|Quadro') { return 'NVIDIA' }
+            if ($gpu.Name -match 'AMD|RADEON|RX|FirePro') { return 'AMD' }
+            if ($gpu.Name -match 'Intel|HD Graphics|UHD Graphics|Iris') { return 'Intel' }
         }
 
-        return if ($primaryGPU) { $primaryGPU } else { 'Other' }
         return 'Other'
     }
+    catch {
+        Log "Unable to detect GPU vendor: $($_.Exception.Message)" 'Warning'
+        return 'Other'
+    }
+}
 
 function Set-Reg {
-    param($Path,$Name,$Type='DWord',$Value,$RequiresAdmin=$false)
+    param(
+        [string]$Path,
+        [string]$Name,
+        [ValidateSet('String','ExpandString','Binary','DWord','QWord','MultiString')]
+        [string]$Type = 'DWord',
+        $Value,
+        [switch]$RequiresAdmin
+    )
 
-    # Enhanced parameter validation
     if (-not $Path -or -not $Name) {
         Log "Set-Reg: Invalid parameters - Path: '$Path', Name: '$Name'" 'Error'
         return $false
     }
 
-    # Admin privilege check
     if ($RequiresAdmin -and -not (Test-AdminPrivileges)) {
         Log "Set-Reg: Administrative privileges required for $Path\$Name" 'Warning'
         return $false
     }
 
-    # Cache optimization
     $cacheKey = "$Path\$Name"
     if ($global:RegistryCache.ContainsKey($cacheKey) -and $global:RegistryCache[$cacheKey] -eq $Value) {
-        Log "Set-Reg: Using cached value for $cacheKey" 'Info'
         return $true
     }
 
-        # Enhanced parent path creation and checking
-        $parentPaths = @()
-        $currentPath = $Path
-
-        # Build list of parent paths that need to be created
-        while ($currentPath -and -not (Test-Path $currentPath -ErrorAction SilentlyContinue)) {
-            $parentPaths += $currentPath
-            $parent = Split-Path $currentPath -Parent
-            if ($parent -eq $currentPath) { break } # Reached root
-            $currentPath = $parent
-
+    try {
+        $parent = Split-Path $Path -Parent
+        if ($parent -and -not (Test-Path $Path)) {
+            New-Item -Path $Path -Force -ErrorAction Stop | Out-Null
         }
 
-        # Create parent paths from top down
-        for ($i = $parentPaths.Count - 1; $i -ge 0; $i--) {
-            $pathToCreate = $parentPaths[$i]
-                Log "Set-Reg: Creating registry path: $pathToCreate" 'Info'
-                New-Item -Path $pathToCreate -Force -ErrorAction Stop | Out-Null
-                Log "Set-Reg: Failed to create registry path '$pathToCreate': $($_.Exception.Message)" 'Error'
-                return $false
-            }
-        }
-
-        # Verify final path exists
-        if (-not (Test-Path $Path -ErrorAction SilentlyContinue)) {
-            Log "Set-Reg: Final path verification failed for: $Path" 'Error'
-            return $false
-        }
-
-        # Set or update the registry value
-        $valueExists = $null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)
-
-        if ($valueExists) {
-            Log "Set-Reg: Updating existing value $Path\$Name = $Value" 'Info'
+        $exists = $null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)
+        if ($exists) {
             Set-ItemProperty -Path $Path -Name $Name -Value $Value -Force -ErrorAction Stop
         } else {
-            Log "Set-Reg: Creating new value $Path\$Name = $Value (Type: $Type)" 'Info'
             New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType $Type -Force -ErrorAction Stop | Out-Null
+        }
 
-        # Verify the value was set correctly
-        $verifyValue = Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
-        if ($null -ne $verifyValue -and $verifyValue.$Name -eq $Value) {
+        $verify = Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop
+        if ($null -ne $verify -and $verify.$Name -eq $Value) {
             $global:RegistryCache[$cacheKey] = $Value
-            Log "Set-Reg: Successfully set and verified $Path\$Name = $Value" 'Success'
             return $true
-        } else {
-            Log "Set-Reg: Value verification failed for $Path\$Name" 'Error'
-            return $false
+        }
 
-        Log "Set-Reg: Error setting registry value ${Path}\${Name}: $($_.Exception.Message)" 'Error'
+        Log "Set-Reg: Verification failed for $Path\$Name" 'Error'
         return $false
+    }
+    catch {
+        Log "Set-Reg: Error setting ${Path}\${Name}: $($_.Exception.Message)" 'Error'
+        return $false
+    }
+}
 
 function Get-Reg {
-    param($Path, $Name)
-        (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name
-        $null
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    try {
+        return (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name
     }
+    catch {
+        return $null
+    }
+}
 
 function Remove-Reg {
-    param($Path, $Name)
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    try {
         Remove-ItemProperty -Path $Path -Name $Name -Force -ErrorAction Stop
         return $true
+    }
+    catch {
         return $false
     }
-
+}
