@@ -111,7 +111,7 @@ $entryPoint = @(
 
 $allLines = [System.Collections.Generic.List[string]]::new()
 foreach ($line in $header) {
-    [void]$allLines.Add([string]$line)
+    $allLines.Add([string]$line)
 }
 
 foreach ($file in $filesToProcess) {
@@ -124,17 +124,20 @@ foreach ($file in $filesToProcess) {
 
     $moduleLines = Get-Content -Path $modulePath -Encoding UTF8
     foreach ($line in [string[]]$moduleLines) {
-        [void]$allLines.Add($line)
+        $allLines.Add([string]$line)
     }
     $allLines.Add("#endregion ${file}")
     $allLines.Add('')
 }
 
 foreach ($line in $entryPoint) {
-    [void]$allLines.Add([string]$line)
+    $allLines.Add([string]$line)
 }
 
-$allLines | Set-Content -Path $mergedPath -Encoding UTF8BOM
+# Older Windows PowerShell releases do not support the UTF8BOM encoding token.
+# Use a UTF-8 encoding instance with BOM to stay compatible across versions.
+$utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+[System.IO.File]::WriteAllLines($mergedPath, $allLines.ToArray(), $utf8WithBom)
 
 Write-Host "Merged script written to $mergedPath" -ForegroundColor Green
 
