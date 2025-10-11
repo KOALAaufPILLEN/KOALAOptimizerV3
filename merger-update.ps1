@@ -45,7 +45,7 @@ $ErrorActionPreference = 'Stop'
 $repo = 'KOALAaufPILLEN/KOALAOptimizerV3'
 $rawBaseUri = "https://raw.githubusercontent.com/$repo/$Branch"
 $scriptRoot = $PSScriptRoot
-$filesToProcess = @(
+[string[]]$filesToProcess = @(
     'helpers.ps1',
     'networkTweaks.ps1',
     'systemTweaks.ps1',
@@ -90,17 +90,17 @@ if (-not $SkipDownload) {
 $mergedPath = Join-Path $scriptRoot $Output
 Write-Host "Building merged script -> $Output" -ForegroundColor Green
 
-$header = @(
+[string[]]$header = @(
     '# KOALA Gaming Optimizer v3.0 - merged script',
     "# Generated on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     '# Source repository: https://github.com/KOALAaufPILLEN/KOALAOptimizerV3',
-    '' ,
+    '',
     'Set-StrictMode -Version Latest',
     "$ErrorActionPreference = 'Stop'",
     ''
 )
 
-$entryPoint = @(
+[string[]]$entryPoint = @(
     'try {',
     '    Initialize-Application',
     '} catch {',
@@ -110,9 +110,7 @@ $entryPoint = @(
 )
 
 $allLines = [System.Collections.Generic.List[string]]::new()
-foreach ($line in $header) {
-    [void]$allLines.Add([string]$line)
-}
+$allLines.AddRange($header)
 
 foreach ($file in $filesToProcess) {
     $allLines.Add("#region ${file}")
@@ -122,19 +120,18 @@ foreach ($file in $filesToProcess) {
         throw "Required file '$file' was not found at $modulePath."
     }
 
-    $moduleLines = Get-Content -Path $modulePath -Encoding UTF8
-    foreach ($line in [string[]]$moduleLines) {
-        [void]$allLines.Add($line)
-    }
+    [string[]]$moduleLines = Get-Content -Path $modulePath -Encoding UTF8
+    $allLines.AddRange($moduleLines)
     $allLines.Add("#endregion ${file}")
     $allLines.Add('')
 }
 
-foreach ($line in $entryPoint) {
-    [void]$allLines.Add([string]$line)
-}
+$allLines.AddRange($entryPoint)
 
-$allLines | Set-Content -Path $mergedPath -Encoding UTF8BOM
+# Older Windows PowerShell releases do not support the UTF8BOM encoding token.
+# Use a UTF-8 encoding instance with BOM to stay compatible across versions.
+$utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+[System.IO.File]::WriteAllLines($mergedPath, $allLines.ToArray(), $utf8WithBom)
 
 Write-Host "Merged script written to $mergedPath" -ForegroundColor Green
 
