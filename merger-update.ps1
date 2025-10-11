@@ -113,7 +113,7 @@ $allLines = [System.Collections.Generic.List[string]]::new()
 $allLines.AddRange($header)
 
 foreach ($file in $filesToProcess) {
-    $allLines.Add("#region ${file}")
+    $allLines += "#region ${file}"
     $modulePath = Join-Path $scriptRoot $file
 
     if (-not (Test-Path $modulePath)) {
