@@ -530,6 +530,11 @@ if ($window) {
     ) | Where-Object { $_ -ne $null }
 }
 
+if (-not $navButtons -or $navButtons.Count -lt 7) {
+    Show-CriticalError 'One or more navigation controls are missing from the GUI definition.'
+    return
+}
+
 $panels = @{}
 if ($window) {
     $panels = @{
@@ -543,6 +548,11 @@ if ($window) {
     }
 }
 
+if ($panels.Values -contains $null) {
+    Show-CriticalError 'Required content panels were not found in the GUI XAML. Initialization halted.'
+    return
+}
+
 $headerTitle    = $null
 $headerSubtitle = $null
 $adminStatus    = $null
@@ -552,6 +562,11 @@ if ($window) {
     $headerSubtitle = $window.FindName('HeaderSubtitle')
     $adminStatus    = $window.FindName('AdminStatus')
     $logBox         = $window.FindName('LogTextBox')
+}
+
+if (-not $headerTitle -or -not $headerSubtitle -or -not $adminStatus -or -not $logBox) {
+    Show-CriticalError 'Critical header controls could not be located. Please verify the GUI layout.'
+    return
 }
 
 $panelMetadata = @{

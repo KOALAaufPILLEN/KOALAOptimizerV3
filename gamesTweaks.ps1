@@ -6,6 +6,29 @@ $global:ActiveGameProcesses = @()
 $global:ActiveGames = @()
 $global:GameDetectionTimer = $null
 $global:AutoOptimizeEnabled = $false
+$script:DetectedGpuVendor = $null
+
+function Get-DetectedGpuVendor {
+    if (-not $script:DetectedGpuVendor) {
+        try {
+            $script:DetectedGpuVendor = Get-GPUVendor
+        }
+        catch {
+            $script:DetectedGpuVendor = 'Other'
+        }
+    }
+
+    return $script:DetectedGpuVendor
+}
+
+function Test-GpuVendorSupport {
+    param(
+        [string[]]$SupportedVendors
+    )
+
+    $vendor = Get-DetectedGpuVendor
+    return $SupportedVendors -contains $vendor
+}
 
 function Invoke-LoggedAction {
     param(
@@ -629,6 +652,14 @@ function Apply-GameOptimizations {
         $profile = $GameProfiles[$GameKey]
         Log "Applying optimizations for $($profile.DisplayName)" 'Info'
 
+        if ($Process -and $Process.HasExited) {
+            Log "Process for $($profile.DisplayName) is no longer running. Skipping process-specific tweaks." 'Warning'
+            $Process = $null
+        }
+        elseif (-not $Process) {
+            Log "No active process handle supplied for $($profile.DisplayName). Applying profile-level tweaks only." 'Info'
+        }
+
         if ($Process -and $profile.Priority -and $profile.Priority -ne 'Normal') {
             Invoke-LoggedAction -SuccessMessage "Set process priority to $($profile.Priority)" -FailureMessage "Failed to set process priority" -Action {
                 $Process.PriorityClass = $profile.Priority
@@ -710,7 +741,13 @@ function Enable-GPUScheduling {
             return $false
         }
 
-        $result = Invoke-LoggedAction -SuccessMessage 'Hardware GPU scheduling enabled' -FailureMessage 'Failed to enable hardware GPU scheduling' -Action {
+        $vendor = Get-DetectedGpuVendor
+        if ($vendor -eq 'Other') {
+            Log 'Unable to detect GPU vendor. Skipping hardware scheduling tweak.' 'Warning'
+            return $false
+        }
+
+        $result = Invoke-LoggedAction -SuccessMessage "Hardware GPU scheduling enabled for $vendor" -FailureMessage 'Failed to enable hardware GPU scheduling' -Action {
             Set-Reg $gpuRegistryPath 'HwSchMode' 'DWord' 2 -RequiresAdmin $true | Out-Null
             Set-Reg "$gpuRegistryPath\Scheduler" 'EnablePreemption' 'DWord' 1 -RequiresAdmin $true | Out-Null
             Set-Reg $gpuRegistryPath 'PlatformSupportMiracast' 'DWord' 0 -RequiresAdmin $true | Out-Null

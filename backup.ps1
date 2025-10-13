@@ -85,6 +85,7 @@ function Create-RegFile {
     }
 }
 
+
 function Create-Backup {
     <#
         .SYNOPSIS
@@ -107,8 +108,22 @@ function Create-Backup {
         return
     }
 
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $selectedPath = $dialog.FileName
     $selectedExtension = [System.IO.Path]::GetExtension($selectedPath).ToLowerInvariant()
+    $targetDirectory = Split-Path $selectedPath -Parent
+    if ($targetDirectory -and -not (Test-Path $targetDirectory)) {
+        try {
+            New-Item -Path $targetDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Log "Failed to create backup directory $targetDirectory: $($_.Exception.Message)" 'Error'
+            return
+        }
+    }
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($selectedPath)
+    $selectedPath = Join-Path $targetDirectory ("{0}_{1}{2}" -f $baseName, $timestamp, $selectedExtension)
 
     $backupData = [ordered]@{
         Timestamp       = Get-Date
@@ -127,7 +142,7 @@ function Create-Backup {
         @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'; Name = 'NetworkThrottlingIndex' }
         @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'GPU Priority' }
         @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'Priority' }
-        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'Scheduling Category' }
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'; Name = 'SchedulingCategory' }
         @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_Enabled' }
         @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_FSEBehaviorMode' }
         @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_FSEBehavior' }
@@ -192,24 +207,34 @@ function Create-Backup {
         switch ($selectedExtension) {
             '.json' {
                 $json = $backupData | ConvertTo-Json -Depth 10
-                Set-Content -Path $selectedPath -Value $json -Encoding UTF8
-                $regPath = $selectedPath -replace '\.json$', '.reg'
+                $tempJson = [System.IO.Path]::GetTempFileName()
+                Set-Content -Path $tempJson -Value $json -Encoding UTF8
+                Copy-Item -Path $tempJson -Destination $selectedPath -Force -ErrorAction Stop
+                Remove-Item -Path $tempJson -Force -ErrorAction SilentlyContinue
+                $regPath = $selectedPath -replace '\.json$', "_${timestamp}.reg"
                 Create-RegFile -BackupData $backupData -OutputPath $regPath
                 $message = "JSON backup saved to:`n$selectedPath`n`nRegistry export:`n$regPath"
                 break
             }
             '.reg' {
-                Create-RegFile -BackupData $backupData -OutputPath $selectedPath
-                $jsonPath = $selectedPath -replace '\.reg$', '.json'
+                $regPath = $selectedPath
+                Create-RegFile -BackupData $backupData -OutputPath $regPath
+                $jsonPath = $selectedPath -replace '\.reg$', "_${timestamp}.json"
                 $json = $backupData | ConvertTo-Json -Depth 10
-                Set-Content -Path $jsonPath -Value $json -Encoding UTF8
+                $tempJson = [System.IO.Path]::GetTempFileName()
+                Set-Content -Path $tempJson -Value $json -Encoding UTF8
+                Copy-Item -Path $tempJson -Destination $jsonPath -Force -ErrorAction Stop
+                Remove-Item -Path $tempJson -Force -ErrorAction SilentlyContinue
                 $message = "Registry backup saved to:`n$selectedPath`n`nJSON copy:`n$jsonPath"
                 $selectedPath = $jsonPath
                 break
             }
             default {
                 $json = $backupData | ConvertTo-Json -Depth 10
-                Set-Content -Path $selectedPath -Value $json -Encoding UTF8
+                $tempJson = [System.IO.Path]::GetTempFileName()
+                Set-Content -Path $tempJson -Value $json -Encoding UTF8
+                Copy-Item -Path $tempJson -Destination $selectedPath -Force -ErrorAction Stop
+                Remove-Item -Path $tempJson -Force -ErrorAction SilentlyContinue
                 $message = "Backup saved to:`n$selectedPath"
                 break
             }
