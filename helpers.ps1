@@ -59,13 +59,22 @@ $BrushConverter = New-Object System.Windows.Media.BrushConverter
 # ---------- Global Performance Variables ----------
 # Global state containers shared across modules. These variables are intentionally
 # scoped globally because multiple scripts update them (GUI handlers, service
-# routines, etc.). Each entry is documented to clarify why it exists.
+# routines, etc.). Each entry is documented to clarify why it exists. Guard every
+# script-scoped value so strict mode never throws when the helper library is
+# dot-sourced before any initialization occurs.
 $global:PerformanceCounters = @{}          # Real-time perf metrics surfaced in the dashboard
-$script:LocalizationResources = $null      # Currently loaded localization strings
-if (-not $script:CurrentLanguage) {
+if (-not (Test-Path 'variable:script:LocalizationResources')) { $script:LocalizationResources = $null }
+$languageVariable = Get-Variable -Name CurrentLanguage -Scope Script -ErrorAction SilentlyContinue
+if (-not $languageVariable -or [string]::IsNullOrWhiteSpace([string]$languageVariable.Value)) {
     $script:CurrentLanguage = 'en'
 }
-$script:IsLanguageInitializing = $false    # Prevents recursive language initialization
+$languageVariable = $null
+if (-not (Test-Path 'variable:script:IsLanguageInitializing')) { $script:IsLanguageInitializing = $false }
+if (-not (Test-Path 'variable:script:SafeConfigDirectory')) { $script:SafeConfigDirectory = $null }
+if (-not (Test-Path 'variable:script:HasWarnedUnsafeConfigPath')) { $script:HasWarnedUnsafeConfigPath = $false }
+if (-not (Test-Path 'variable:script:PrimaryGameListPanel')) { $script:PrimaryGameListPanel = $null }
+if (-not (Test-Path 'variable:script:DashboardGameListPanel')) { $script:DashboardGameListPanel = $null }
+if (-not (Test-Path 'variable:script:SharedBrushConverter')) { $script:SharedBrushConverter = $null }
 $global:OptimizationCache = @{}            # Stores last-run optimization results
 $global:ActiveGames = @()                  # Names of currently detected games
 $global:MenuMode = 'Basic'                 # UI mode (Basic/Advanced)
@@ -145,8 +154,9 @@ $global:ThemeDefinitions = @{
 
 # Pre-instantiate the shared brush converter so later theming fallbacks never
 # leave string literals or PSObject wrappers parked in resource dictionaries.
+if (-not $script:SharedBrushConverter) {
     $script:SharedBrushConverter = [System.Windows.Media.BrushConverter]::new()
-    $script:SharedBrushConverter = $null
+}
 
 $script:BrushResourceKeys = @(
     'AppBackgroundBrush'
@@ -1080,12 +1090,11 @@ function New-SolidColorBrushSafe {
 
 function Get-SharedBrushConverter {
     if (-not $script:SharedBrushConverter -or $script:SharedBrushConverter.GetType().FullName -ne 'System.Windows.Media.BrushConverter') {
-            $script:SharedBrushConverter = [System.Windows.Media.BrushConverter]::new()
-            $script:SharedBrushConverter = $null
-        }
+        $script:SharedBrushConverter = [System.Windows.Media.BrushConverter]::new()
     }
 
     return $script:SharedBrushConverter
+}
 
 function Set-ShapeFillSafe {
     param(
@@ -1441,6 +1450,11 @@ function Find-AllControlsOfType {
             try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $i) } catch { $visualChild = $null }
             if ($visualChild) { $childCandidates += $visualChild }
         }
+    }
+
+    if ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
+        $childCandidates += $Parent.Content
+    }
 
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
