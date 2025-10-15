@@ -1,4 +1,4 @@
-﻿# ---------- KOALA Optimizer - Gaming Module ----------
+# ---------- KOALA Optimizer - Gaming Module ----------
 [CmdletBinding()]
 param()
 

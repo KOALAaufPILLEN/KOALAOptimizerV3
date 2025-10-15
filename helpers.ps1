@@ -1,20 +1,34 @@
-﻿# ---------- Check PowerShell Version ----------
+# ---------- Check PowerShell Version ----------
 if ($PSVersionTable.PSVersion.Major -lt 5) {
-    Write-Host "This script requires PowerShell 5.0 or higher" -ForegroundColor Red
-    exit 1
+    throw 'KOALA Optimizer requires PowerShell 5.0 or higher.'
 }
 
 # Detect whether the current platform supports the Windows-specific UI that the
 # optimizer relies on. Older PowerShell builds do not expose the $IsWindows
 # automatic variable, so fall back to the .NET APIs when necessary.
 $script:IsWindowsPlatform = $false
-    $script:IsWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+$runtimeCheck = $false
+$platformCheck = $false
+try {
+    $runtimeCheck = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows
     )
-    $script:IsWindowsPlatform = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+}
+catch {
+    $runtimeCheck = $false
+}
+
+try {
+    $platformCheck = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+}
+catch {
+    $platformCheck = $false
+}
+
+$script:IsWindowsPlatform = ($runtimeCheck -or $platformCheck)
 
 if (-not $script:IsWindowsPlatform) {
-    Write-Host 'KOALA Gaming Optimizer requires Windows because it depends on WPF and Windows-specific APIs.' -ForegroundColor Yellow
+    Write-Warning 'KOALA Gaming Optimizer requires Windows because it depends on WPF and Windows-specific APIs.'
     return
 }
 
@@ -35,8 +49,8 @@ try {
     Add-Type -AssemblyName $assemblies -ErrorAction Stop
 }
 catch {
-    $warning = "Warning: WPF assemblies not available. This script requires Windows with .NET Framework."
-    Write-Host $warning -ForegroundColor Yellow
+    $warning = 'WPF assemblies not available. This script requires Windows with .NET Framework.'
+    Write-Warning $warning
     return
 }
 
