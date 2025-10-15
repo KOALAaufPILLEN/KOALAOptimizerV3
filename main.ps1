@@ -29,7 +29,6 @@ $moduleList = @(
     'gamesTweaks.ps1',
     'backup.ps1',
     'benchmark.ps1',
-    'orchestrator.ps1',
     'gui.ps1'
 )
 
@@ -56,6 +55,20 @@ foreach ($module in $moduleList) {
         Write-MainLog "Failed to load ${module}: $($_.Exception.Message)" 'Error'
         throw
     }
+}
+
+$orchestratorPath = Join-Path $PSScriptRoot 'orchestrator.ps1'
+if (Test-Path $orchestratorPath) {
+    try {
+        . $orchestratorPath
+        Write-MainLog 'Loaded orchestrator.ps1' 'Success'
+    }
+    catch {
+        Write-MainLog "Failed to load orchestrator.ps1: $($_.Exception.Message)" 'Error'
+    }
+}
+else {
+    Write-MainLog 'orchestrator.ps1 not found. Continuing without orchestration helpers.' 'Warning'
 }
 
 if ($NoGui) {

@@ -140,8 +140,8 @@ try {
         Write-Warning "Parser errors detected:"
         foreach ($failure in $script:parseFailures) {
             Write-Warning "  $($failure.Path)"
-            foreach ($error in $failure.Errors) {
-                Write-Warning "    $error"
+            foreach ($parseError in $failure.Errors) {
+                Write-Warning "    $parseError"
             }
         }
     }

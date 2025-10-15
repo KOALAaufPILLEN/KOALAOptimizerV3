@@ -1,6 +1,3 @@
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -21,6 +18,9 @@ param(
     [Parameter()]
     [switch]$StopOnError
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 # Attempt to use the shared logging routine if helpers.ps1 is available.
 $script:OrchestratorLogger = $null
@@ -92,7 +92,7 @@ foreach ($scriptPath in $Scripts) {
         Write-OrchestratorLog "Loaded script: $resolvedPath" 'Success'
     }
     catch {
-        Write-OrchestratorLog "Failed to load $resolvedPath: $($_.Exception.Message)" 'Error'
+        Write-OrchestratorLog "Failed to load ${resolvedPath}: $($_.Exception.Message)" 'Error'
         if ($StopOnError) {
             throw
         }

@@ -168,7 +168,7 @@ foreach ($file in $filesToProcess) {
         $allLines.AddRange($moduleLines)
     }
     catch {
-        Write-MergerLog "Failed to read $modulePath: $($_.Exception.Message)" 'Error'
+        Write-MergerLog "Failed to read ${modulePath}: $($_.Exception.Message)" 'Error'
         throw
     }
 
@@ -202,14 +202,21 @@ if (-not $SkipExecutable) {
     $ps2exeUrl = 'https://raw.githubusercontent.com/MScholtes/PS2EXE/master/ps2exe.ps1'
     $ps2exePath = Join-Path $tempDir 'ps2exe.ps1'
 
-    try {
-        Write-MergerLog 'Downloading PS2EXE converter ...'
-        Invoke-WebRequest -Uri $ps2exeUrl -OutFile $ps2exePath -UseBasicParsing -ErrorAction Stop
-        Write-MergerLog 'PS2EXE converter downloaded' 'Success'
+    if (-not $SkipDownload -or -not (Test-Path $ps2exePath)) {
+        try {
+            Write-MergerLog -Message 'Downloading PS2EXE converter ...'
+            Invoke-WebRequest -Uri $ps2exeUrl -OutFile $ps2exePath -UseBasicParsing -ErrorAction Stop
+            Write-MergerLog -Message 'PS2EXE converter downloaded' -Level 'Success'
+        }
+        catch {
+            Write-MergerLog -Message "Failed to download PS2EXE: $($_.Exception.Message)" -Level 'Warning'
+            Write-MergerLog -Message 'Skipping executable creation. You can rerun merger-update.ps1 to retry once connectivity is restored.' -Level 'Warning'
+            return
+        }
     }
-    catch {
-        Write-MergerLog "Failed to download PS2EXE: $($_.Exception.Message)" 'Warning'
-        Write-MergerLog 'Skipping executable creation. You can rerun merger-update.ps1 to retry once connectivity is restored.' 'Warning'
+
+    if (-not (Test-Path $ps2exePath)) {
+        Write-MergerLog -Message "PS2EXE converter not found at $ps2exePath. Skipping executable build." -Level 'Warning'
         return
     }
 
@@ -222,13 +229,13 @@ if (-not $SkipExecutable) {
             '-description', 'Merged KOALA Optimizer V3 toolkit'
         )
 
-        Write-MergerLog 'Converting merged script to executable ...'
+        Write-MergerLog -Message 'Converting merged script to executable ...'
         & $ps2exePath @ps2exeArgs
-        Write-MergerLog "Executable written to $exeOutput" 'Success'
+        Write-MergerLog -Message "Executable written to $exeOutput" -Level 'Success'
     }
     catch {
-        Write-MergerLog "Failed to create executable: $($_.Exception.Message)" 'Error'
-        Write-MergerLog 'The merged script is still available. You can rerun merger-update.ps1 to retry the conversion.' 'Warning'
+        Write-MergerLog -Message "Failed to create executable: $($_.Exception.Message)" -Level 'Error'
+        Write-MergerLog -Message 'The merged script is still available. You can rerun merger-update.ps1 to retry the conversion.' -Level 'Warning'
     }
     finally {
         if (Test-Path $ps2exePath) {

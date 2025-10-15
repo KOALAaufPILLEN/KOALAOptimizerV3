@@ -117,7 +117,7 @@ function Create-Backup {
             New-Item -Path $targetDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
         }
         catch {
-            Log "Failed to create backup directory $targetDirectory: $($_.Exception.Message)" 'Error'
+            Log "Failed to create backup directory ${targetDirectory}: $($_.Exception.Message)" 'Error'
             return
         }
     }

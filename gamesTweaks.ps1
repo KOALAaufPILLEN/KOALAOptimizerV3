@@ -1,4 +1,7 @@
-﻿﻿# ---------- KOALA Optimizer - Gaming Module ----------
+﻿# ---------- KOALA Optimizer - Gaming Module ----------
+[CmdletBinding()]
+param()
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -132,9 +135,18 @@ function Start-AutoGameOptimization {
         $GameProfile
     )
 
+    if (-not $GameProfile) {
+        return
+    }
+
     try {
         $profile = $GameProfile.Profile
         if (-not $profile) { return }
+
+        if (-not $GameProfile.Process -or $GameProfile.Process.HasExited) {
+            Log 'Skipped auto-optimization because the target game process is no longer running.' 'Warning'
+            return
+        }
 
         Log "Auto-optimizing detected game: $($profile.DisplayName)" 'Info'
 

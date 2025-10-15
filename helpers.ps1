@@ -43,21 +43,24 @@ catch {
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 
 # ---------- Global Performance Variables ----------
-$global:PerformanceCounters = @{}
-$script:LocalizationResources = $null
+# Global state containers shared across modules. These variables are intentionally
+# scoped globally because multiple scripts update them (GUI handlers, service
+# routines, etc.). Each entry is documented to clarify why it exists.
+$global:PerformanceCounters = @{}          # Real-time perf metrics surfaced in the dashboard
+$script:LocalizationResources = $null      # Currently loaded localization strings
 if (-not $script:CurrentLanguage) {
     $script:CurrentLanguage = 'en'
 }
-$script:IsLanguageInitializing = $false
-$global:OptimizationCache = @{}
-$global:ActiveGames = @()
-$global:MenuMode = "Basic"  # Basic or Advanced
-$global:AutoOptimizeEnabled = $false
-$global:LastTimestamp = $null
-$global:CachedTimestamp = ""
-$global:LogBoxAvailable = $false
-$global:RegistryCache = @{}
-$global:LastOptimizationTime = $null  # Track when optimizations were last applied
+$script:IsLanguageInitializing = $false    # Prevents recursive language initialization
+$global:OptimizationCache = @{}            # Stores last-run optimization results
+$global:ActiveGames = @()                  # Names of currently detected games
+$global:MenuMode = 'Basic'                 # UI mode (Basic/Advanced)
+$global:AutoOptimizeEnabled = $false       # Flag for automatic game optimization
+$global:LastTimestamp = $null              # Timestamp caching for log entries
+$global:CachedTimestamp = ''               # Cached string representation of timestamp
+$global:LogBoxAvailable = $false           # Indicates whether UI log textbox is ready
+$global:RegistryCache = @{}                # Cache of registry writes to avoid duplicates
+$global:LastOptimizationTime = $null       # Last time optimizations were executed
 
 # ---------- .NET Framework 4.8 Compatibility Helper Functions ----------
 function Set-BorderBrushSafe {
@@ -389,7 +392,18 @@ function Add-LogToHistory {
 
 
 function Log {
-    param([string]$msg, [string]$Level = 'Info')
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Message,
+
+        [Parameter()]
+        [ValidateSet('Info','Success','Warning','Error','Debug','Trace','Context','ErrorContext')]
+        [string]$Level = 'Info'
+    )
+
+    $msg = $Message
 
     if (-not $global:LastTimestamp -or ((Get-Date) - $global:LastTimestamp).TotalMilliseconds -gt 100) {
         $global:CachedTimestamp = [DateTime]::Now.ToString('HH:mm:ss')
@@ -448,8 +462,8 @@ function Log {
             $errorContext = ' (File in use - another instance may be running)'
         }
 
-        Write-Host "LOG FILE ERROR: $($_.Exception.Message)$errorContext" -ForegroundColor Red
-        Write-Host $logMessage -ForegroundColor (Get-LogColor $Level)
+        Write-Warning "LOG FILE ERROR: $($_.Exception.Message)$errorContext"
+        Write-Output $logMessage
     }
 
     if ($global:LogBox -and $global:LogBoxAvailable) {

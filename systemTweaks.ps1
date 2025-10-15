@@ -68,7 +68,7 @@ function New-SystemTweaksRegistryBackup {
             }
         }
         catch {
-            Log "Failed to export registry path $path: $($_.Exception.Message)" 'Warning'
+            Log "Failed to export registry path ${path}: $($_.Exception.Message)" 'Warning'
         }
     }
 
@@ -147,7 +147,7 @@ function Restore-SystemTweaksBackup {
             }
         }
         catch {
-            Log "Error restoring registry backup $file: $($_.Exception.Message)" 'Error'
+            Log "Error restoring registry backup ${file}: $($_.Exception.Message)" 'Error'
         }
     }
 }
@@ -191,7 +191,7 @@ function Export-SystemTweaksSnapshot {
             New-Item -Path $DestinationFolder -ItemType Directory -Force | Out-Null
         }
         catch {
-            throw "Unable to create destination folder $DestinationFolder: $($_.Exception.Message)"
+            throw "Unable to create destination folder ${DestinationFolder}: $($_.Exception.Message)"
         }
     }
 
@@ -211,7 +211,7 @@ function Export-SystemTweaksSnapshot {
                     $exported += $destination
                 }
                 catch {
-                    Log "Failed to copy backup $file to $destination: $($_.Exception.Message)" 'Warning'
+                    Log "Failed to copy backup ${file} to ${destination}: $($_.Exception.Message)" 'Warning'
                 }
             }
         }
