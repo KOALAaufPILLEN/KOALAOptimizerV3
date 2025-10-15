@@ -42,6 +42,39 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Prefer the central logger provided by helpers.ps1 when available.
+$script:MergerLogger = $null
+try {
+    $helpersPath = Join-Path $PSScriptRoot 'helpers.ps1'
+    if (Test-Path $helpersPath) {
+        . $helpersPath
+        if (Get-Command -Name Log -ErrorAction SilentlyContinue) {
+            $script:MergerLogger = { param($Message, $Level) Log $Message $Level }
+        }
+    }
+}
+catch {
+    # Fallback to basic stdout logging if helpers.ps1 cannot be loaded.
+    $script:MergerLogger = $null
+}
+
+function Write-MergerLog {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [ValidateSet('Info','Success','Warning','Error')]
+        [string]$Level = 'Info'
+    )
+
+    if ($script:MergerLogger) {
+        & $script:MergerLogger $Message $Level
+    }
+    else {
+        Write-Output "[$Level] $Message"
+    }
+}
+
 $repo = 'KOALAaufPILLEN/KOALAOptimizerV3'
 $rawBaseUri = "https://raw.githubusercontent.com/$repo/$Branch"
 $scriptRoot = $PSScriptRoot
@@ -63,19 +96,22 @@ if (-not $SkipDownload) {
         if ([Net.ServicePointManager]::SecurityProtocol -band [Net.SecurityProtocolType]::Tls12 -eq 0) {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         }
-    } catch {
-        Write-Verbose "Failed to set TLS 1.2. Continuing with default security protocol."
+    }
+    catch {
+        Write-MergerLog "Failed to set TLS 1.2. Continuing with default security protocol. $_" 'Warning'
     }
 
     foreach ($file in $filesToProcess) {
         $uri = "$rawBaseUri/$file"
         $destination = Join-Path $scriptRoot $file
 
-        Write-Host "Downloading $file ..." -ForegroundColor Cyan
+        Write-MergerLog "Downloading $file ..."
         try {
-            Invoke-WebRequest -Uri $uri -OutFile $destination -UseBasicParsing
-        } catch {
-            Write-Host "Download failed for ${file}: $($_.Exception.Message)" -ForegroundColor Red
+            Invoke-WebRequest -Uri $uri -OutFile $destination -UseBasicParsing -ErrorAction Stop
+            Write-MergerLog "Downloaded $file" 'Success'
+        }
+        catch {
+            Write-MergerLog "Download failed for ${file}: $($_.Exception.Message)" 'Error'
             throw
         }
     }
@@ -83,12 +119,19 @@ if (-not $SkipDownload) {
     # main.ps1 is small and primarily holds the entrypoint, so refresh it too
     $mainUri = "$rawBaseUri/main.ps1"
     $mainDestination = Join-Path $scriptRoot 'main.ps1'
-    Write-Host 'Downloading main.ps1 ...' -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $mainUri -OutFile $mainDestination -UseBasicParsing
+    Write-MergerLog 'Downloading main.ps1 ...'
+    try {
+        Invoke-WebRequest -Uri $mainUri -OutFile $mainDestination -UseBasicParsing -ErrorAction Stop
+        Write-MergerLog 'Downloaded main.ps1' 'Success'
+    }
+    catch {
+        Write-MergerLog "Download failed for main.ps1: $($_.Exception.Message)" 'Error'
+        throw
+    }
 }
 
 $mergedPath = Join-Path $scriptRoot $Output
-Write-Host "Building merged script -> $Output" -ForegroundColor Green
+Write-MergerLog "Building merged script -> $Output"
 
 [string[]]$header = @(
     '# KOALA Gaming Optimizer v3.0 - merged script',
@@ -120,24 +163,36 @@ foreach ($file in $filesToProcess) {
         throw "Required file '$file' was not found at $modulePath."
     }
 
-    [string[]]$moduleLines = Get-Content -Path $modulePath -Encoding UTF8
-    $allLines.AddRange($moduleLines)
+    try {
+        [string[]]$moduleLines = Get-Content -Path $modulePath -Encoding UTF8 -ErrorAction Stop
+        $allLines.AddRange($moduleLines)
+    }
+    catch {
+        Write-MergerLog "Failed to read ${modulePath}: $($_.Exception.Message)" 'Error'
+        throw
+    }
+
     $allLines.Add("#endregion ${file}")
     $allLines.Add('')
 }
 
 $allLines.AddRange($entryPoint)
 
-# Older Windows PowerShell releases do not support the UTF8BOM encoding token.
-# Use a UTF-8 encoding instance with BOM to stay compatible across versions.
-$utf8WithBom = New-Object System.Text.UTF8Encoding($true)
-[System.IO.File]::WriteAllLines($mergedPath, $allLines.ToArray(), $utf8WithBom)
-
-Write-Host "Merged script written to $mergedPath" -ForegroundColor Green
+try {
+    # Older Windows PowerShell releases do not support the UTF8BOM encoding token.
+    # Use a UTF-8 encoding instance with BOM to stay compatible across versions.
+    $utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllLines($mergedPath, $allLines.ToArray(), $utf8WithBom)
+    Write-MergerLog "Merged script written to $mergedPath" 'Success'
+}
+catch {
+    Write-MergerLog "Failed to write merged script: $($_.Exception.Message)" 'Error'
+    throw
+}
 
 if (-not $SkipExecutable) {
     $exeOutput = [System.IO.Path]::ChangeExtension($mergedPath, '.exe')
-    Write-Host "Building standalone executable -> $exeOutput" -ForegroundColor Green
+    Write-MergerLog "Building standalone executable -> $exeOutput"
 
     $tempDir = Join-Path $scriptRoot 'temp-merger-tools'
     if (-not (Test-Path $tempDir)) {
@@ -147,12 +202,21 @@ if (-not $SkipExecutable) {
     $ps2exeUrl = 'https://raw.githubusercontent.com/MScholtes/PS2EXE/master/ps2exe.ps1'
     $ps2exePath = Join-Path $tempDir 'ps2exe.ps1'
 
-    try {
-        Write-Host 'Downloading PS2EXE converter ...' -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $ps2exeUrl -OutFile $ps2exePath -UseBasicParsing
-    } catch {
-        Write-Host "Failed to download PS2EXE: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host 'Skipping executable creation. You can rerun with -SkipExecutable:$false after fixing connectivity.' -ForegroundColor Yellow
+    if (-not $SkipDownload -or -not (Test-Path $ps2exePath)) {
+        try {
+            Write-MergerLog -Message 'Downloading PS2EXE converter ...'
+            Invoke-WebRequest -Uri $ps2exeUrl -OutFile $ps2exePath -UseBasicParsing -ErrorAction Stop
+            Write-MergerLog -Message 'PS2EXE converter downloaded' -Level 'Success'
+        }
+        catch {
+            Write-MergerLog -Message "Failed to download PS2EXE: $($_.Exception.Message)" -Level 'Warning'
+            Write-MergerLog -Message 'Skipping executable creation. You can rerun merger-update.ps1 to retry once connectivity is restored.' -Level 'Warning'
+            return
+        }
+    }
+
+    if (-not (Test-Path $ps2exePath)) {
+        Write-MergerLog -Message "PS2EXE converter not found at $ps2exePath. Skipping executable build." -Level 'Warning'
         return
     }
 
@@ -165,13 +229,15 @@ if (-not $SkipExecutable) {
             '-description', 'Merged KOALA Optimizer V3 toolkit'
         )
 
-        Write-Host 'Converting merged script to executable ...' -ForegroundColor Cyan
+        Write-MergerLog -Message 'Converting merged script to executable ...'
         & $ps2exePath @ps2exeArgs
-        Write-Host "Executable written to $exeOutput" -ForegroundColor Green
-    } catch {
-        Write-Host "Failed to create executable: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host 'The merged script is still available. You can rerun merger-update.ps1 to retry the conversion.' -ForegroundColor Yellow
-    } finally {
+        Write-MergerLog -Message "Executable written to $exeOutput" -Level 'Success'
+    }
+    catch {
+        Write-MergerLog -Message "Failed to create executable: $($_.Exception.Message)" -Level 'Error'
+        Write-MergerLog -Message 'The merged script is still available. You can rerun merger-update.ps1 to retry the conversion.' -Level 'Warning'
+    }
+    finally {
         if (Test-Path $ps2exePath) {
             Remove-Item -Path $ps2exePath -Force -ErrorAction SilentlyContinue
         }
