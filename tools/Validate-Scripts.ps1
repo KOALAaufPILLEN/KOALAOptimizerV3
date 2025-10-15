@@ -15,6 +15,35 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if (-not $PSBoundParameters.ContainsKey('Root')) {
+    $candidate = $null
+    if ($PSScriptRoot) {
+        try { $candidate = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath } catch { $candidate = $null }
+    }
+    elseif ($PSCommandPath) {
+        try {
+            $scriptDirectory = Split-Path -LiteralPath $PSCommandPath -Parent
+            $candidate = (Resolve-Path -LiteralPath (Join-Path $scriptDirectory '..')).ProviderPath
+        }
+        catch {
+            $candidate = $null
+        }
+    }
+
+    if ($candidate) {
+        $Root = $candidate
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    if ($PSCommandPath) {
+        $Root = Split-Path -LiteralPath $PSCommandPath -Parent
+    }
+    else {
+        $Root = (Get-Location)
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Root)) {
     throw "Root path '$Root' does not exist."
 }
@@ -35,7 +64,22 @@ try {
         $closing[$entry.Value] = $entry.Key
     }
 
-    $scripts = Get-ChildItem -Filter '*.ps1' -File -Recurse | Sort-Object FullName
+    $enumerationErrors = @()
+    $scripts = Get-ChildItem -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue -ErrorVariable enumerationErrors |
+        Sort-Object FullName
+
+    if ($enumerationErrors) {
+        $handledTargets = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($errorRecord in $enumerationErrors) {
+            $target = $null
+            try { $target = [string]$errorRecord.TargetObject } catch { $target = $null }
+            if (-not $target) { continue }
+            if ($handledTargets.Add($target)) {
+                Write-Warning "Skipped inaccessible path: $target"
+            }
+        }
+    }
+
     foreach ($script in $scripts) {
         $errors = $null
         [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$errors) | Out-Null
@@ -131,8 +175,10 @@ try {
         }
     }
 
+    $scriptCount = ($scripts | Measure-Object).Count
+
     if ($script:parseFailures.Count -eq 0 -and $script:delimiterFailures.Count -eq 0) {
-        Write-Host "Validated $($scripts.Count) script(s). No syntax or delimiter issues detected." -ForegroundColor Green
+        Write-Host "Validated $scriptCount script(s). No syntax or delimiter issues detected." -ForegroundColor Green
         return
     }
 

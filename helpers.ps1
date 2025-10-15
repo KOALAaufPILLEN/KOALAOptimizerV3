@@ -1378,68 +1378,105 @@ function Normalize-VisualTreeBrushes {
 
 
 # ---------- Theme and Styling Helpers (moved forward for availability) ----------
+function Resolve-ControlType {
+    param(
+        [object]$ControlType
+    )
+
+    if ($ControlType -is [Type]) {
+        return $ControlType
+    }
+
+    if (-not $ControlType) {
+        return $null
+    }
+
+    $typeName = $null
+    if ($ControlType -is [string]) {
+        $typeName = $ControlType.Trim()
+    }
+    else {
+        try { $typeName = $ControlType.ToString() } catch { $typeName = $null }
+    }
+
+    if (-not $typeName) {
+        return $null
+    }
+
+    if ($typeName.StartsWith('[') -and $typeName.EndsWith(']')) {
+        $typeName = $typeName.Trim('[', ']')
+    }
+
+    $knownTypes = @{
+        'System.Windows.Controls.Button' = [System.Windows.Controls.Button]
+        'System.Windows.Controls.ComboBox' = [System.Windows.Controls.ComboBox]
+        'System.Windows.Controls.TextBlock' = [System.Windows.Controls.TextBlock]
+        'System.Windows.Controls.Label' = [System.Windows.Controls.Label]
+        'System.Windows.Controls.Border' = [System.Windows.Controls.Border]
+        'System.Windows.Controls.Primitives.ScrollBar' = [System.Windows.Controls.Primitives.ScrollBar]
+    }
+
+    if ($knownTypes.ContainsKey($typeName)) {
+        return $knownTypes[$typeName]
+    }
+
+    $resolvedType = $null
+    try { $resolvedType = [Type]::GetType($typeName, $false) } catch { $resolvedType = $null }
+    if ($resolvedType) { return $resolvedType }
+
+    try { $resolvedType = [Type]::GetType("$typeName, PresentationFramework", $false) } catch { $resolvedType = $null }
+    return $resolvedType
+}
+
 function Find-AllControlsOfType {
     param(
-        $Parent,
+        [System.Windows.DependencyObject]$Parent,
         [object]$ControlType,
         [ref]$Collection
     )
 
-    if (-not $Parent) { return }
-
-    if ($ControlType -isnot [Type]) {
-        $typeName = $null
-        if ($ControlType -is [string]) {
-            $typeName = $ControlType.Trim()
-            if ($typeName.StartsWith('[') -and $typeName.EndsWith(']')) {
-                $typeName = $typeName.Trim('[', ']')
-            }
-        }
-        elseif ($ControlType) {
-            $typeName = $ControlType.ToString()
-        }
-
-        if ($typeName) {
-            $resolvedType = $null
-            try { $resolvedType = [Type]::GetType($typeName, $false) } catch { }
-            if (-not $resolvedType) {
-                switch ($typeName) {
-                    'System.Windows.Controls.Button' { $resolvedType = [System.Windows.Controls.Button] }
-                    'System.Windows.Controls.ComboBox' { $resolvedType = [System.Windows.Controls.ComboBox] }
-                    'System.Windows.Controls.TextBlock' { $resolvedType = [System.Windows.Controls.TextBlock] }
-                    'System.Windows.Controls.Label' { $resolvedType = [System.Windows.Controls.Label] }
-                    'System.Windows.Controls.Border' { $resolvedType = [System.Windows.Controls.Border] }
-                    'System.Windows.Controls.Primitives.ScrollBar' { $resolvedType = [System.Windows.Controls.Primitives.ScrollBar] }
-                    default {
-                        try { $resolvedType = [Type]::GetType("$typeName, PresentationFramework", $false) } catch { }
-                    }
-                }
-            }
-
-            $ControlType = $resolvedType
-        }
+    if (-not $Parent -or -not $Collection) {
+        return
     }
 
-    if (-not $ControlType -or $ControlType -isnot [Type]) { return }
+    $resolvedType = Resolve-ControlType -ControlType $ControlType
+    if (-not $resolvedType) {
+        return
+    }
 
-    if ($Parent -is $ControlType) {
+    if ($Parent -is $resolvedType) {
         $Collection.Value += $Parent
     }
 
-    $childCandidates = @()
+    $childCandidates = New-Object System.Collections.ArrayList
 
-    if ($Parent.Children) {
-        foreach ($child in $Parent.Children) {
-            if ($child) { $childCandidates += $child }
+    try {
+        $children = $Parent.Children
+    }
+    catch {
+        $children = $null
+    }
+
+    if ($children) {
+        foreach ($child in $children) {
+            if ($child -is [System.Windows.DependencyObject]) {
+                [void]$childCandidates.Add($child)
+            }
         }
     }
 
-    if ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
-        $childCandidates += $Parent.Content
+    if ($Parent.PSObject.Properties['Content']) {
+        $content = $Parent.Content
+        if ($content -is [System.Windows.DependencyObject]) {
+            [void]$childCandidates.Add($content)
+        }
     }
 
-    if ($Parent.Child -and $Parent.Child -is [System.Windows.UIElement]) {
-        $childCandidates += $Parent.Child
+    if ($Parent.PSObject.Properties['Child']) {
+        $singleChild = $Parent.Child
+        if ($singleChild -is [System.Windows.DependencyObject]) {
+            [void]$childCandidates.Add($singleChild)
+        }
     }
 
     if ($Parent -is [System.Windows.DependencyObject]) {
@@ -1448,18 +1485,16 @@ function Find-AllControlsOfType {
         for ($i = 0; $i -lt $visualCount; $i++) {
             $visualChild = $null
             try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $i) } catch { $visualChild = $null }
-            if ($visualChild) { $childCandidates += $visualChild }
+            if ($visualChild -is [System.Windows.DependencyObject]) {
+                [void]$childCandidates.Add($visualChild)
+            }
         }
-    }
-
-    if ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
-        $childCandidates += $Parent.Content
     }
 
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
                 if ($logicalChild -is [System.Windows.DependencyObject]) {
-                    $childCandidates += $logicalChild
+                    [void]$childCandidates.Add($logicalChild)
                 }
             }
         }
@@ -1469,10 +1504,9 @@ function Find-AllControlsOfType {
     }
 
     foreach ($childCandidate in $childCandidates) {
-        Find-AllControlsOfType -Parent $childCandidate -ControlType $ControlType -Collection $Collection
+        Find-AllControlsOfType -Parent $childCandidate -ControlType $resolvedType -Collection $Collection
     }
 }
-
 
 function Set-StackPanelChildSpacing {
     param(
@@ -1480,20 +1514,22 @@ function Set-StackPanelChildSpacing {
         [double]$Spacing
     )
 
-    if (-not $Panel -or -not $Panel.Children) { return }
+    if (-not $Panel -or -not $Panel.Children) {
+        return
+    }
 
     $count = $Panel.Children.Count
-    if ($count -le 1) { return }
+    if ($count -le 1) {
+        return
+    }
 
     for ($index = 0; $index -lt $count; $index++) {
         $child = $Panel.Children[$index]
-        if ($child -isnot [System.Windows.FrameworkElement]) { continue }
-
-        $margin = $child.Margin
-        if (-not $margin) {
-            $margin = [System.Windows.Thickness]::new(0)
+        if ($child -isnot [System.Windows.FrameworkElement]) {
+            continue
         }
 
+        $margin = if ($child.Margin) { $child.Margin } else { [System.Windows.Thickness]::new(0) }
         $newMargin = [System.Windows.Thickness]::new($margin.Left, $margin.Top, $margin.Right, $margin.Bottom)
 
         if ($Panel.Orientation -eq [System.Windows.Controls.Orientation]::Horizontal) {
@@ -1502,10 +1538,8 @@ function Set-StackPanelChildSpacing {
                     $newMargin.Right = $Spacing
                 }
             }
-            else {
-                if ($newMargin.Right -ne 0) {
-                    $newMargin.Right = 0
-                }
+            elseif ($newMargin.Right -ne 0) {
+                $newMargin.Right = 0
             }
         }
         else {
@@ -1514,10 +1548,8 @@ function Set-StackPanelChildSpacing {
                     $newMargin.Bottom = $Spacing
                 }
             }
-            else {
-                if ($newMargin.Bottom -ne 0) {
-                    $newMargin.Bottom = 0
-                }
+            elseif ($newMargin.Bottom -ne 0) {
+                $newMargin.Bottom = 0
             }
         }
 
