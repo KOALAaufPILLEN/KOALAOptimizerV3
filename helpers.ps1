@@ -1450,6 +1450,11 @@ function Find-AllControlsOfType {
             try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $i) } catch { $visualChild = $null }
             if ($visualChild) { $childCandidates += $visualChild }
         }
+    }
+
+    if ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
+        $childCandidates += $Parent.Content
+    }
 
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
