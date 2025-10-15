@@ -1,20 +1,34 @@
-﻿# ---------- Check PowerShell Version ----------
+# ---------- Check PowerShell Version ----------
 if ($PSVersionTable.PSVersion.Major -lt 5) {
-    Write-Host "This script requires PowerShell 5.0 or higher" -ForegroundColor Red
-    exit 1
+    throw 'KOALA Optimizer requires PowerShell 5.0 or higher.'
 }
 
 # Detect whether the current platform supports the Windows-specific UI that the
 # optimizer relies on. Older PowerShell builds do not expose the $IsWindows
 # automatic variable, so fall back to the .NET APIs when necessary.
 $script:IsWindowsPlatform = $false
-    $script:IsWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+$runtimeCheck = $false
+$platformCheck = $false
+try {
+    $runtimeCheck = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows
     )
-    $script:IsWindowsPlatform = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+}
+catch {
+    $runtimeCheck = $false
+}
+
+try {
+    $platformCheck = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+}
+catch {
+    $platformCheck = $false
+}
+
+$script:IsWindowsPlatform = ($runtimeCheck -or $platformCheck)
 
 if (-not $script:IsWindowsPlatform) {
-    Write-Host 'KOALA Gaming Optimizer requires Windows because it depends on WPF and Windows-specific APIs.' -ForegroundColor Yellow
+    Write-Warning 'KOALA Gaming Optimizer requires Windows because it depends on WPF and Windows-specific APIs.'
     return
 }
 
@@ -35,29 +49,32 @@ try {
     Add-Type -AssemblyName $assemblies -ErrorAction Stop
 }
 catch {
-    $warning = "Warning: WPF assemblies not available. This script requires Windows with .NET Framework."
-    Write-Host $warning -ForegroundColor Yellow
+    $warning = 'WPF assemblies not available. This script requires Windows with .NET Framework.'
+    Write-Warning $warning
     return
 }
 
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 
 # ---------- Global Performance Variables ----------
-$global:PerformanceCounters = @{}
-$script:LocalizationResources = $null
+# Global state containers shared across modules. These variables are intentionally
+# scoped globally because multiple scripts update them (GUI handlers, service
+# routines, etc.). Each entry is documented to clarify why it exists.
+$global:PerformanceCounters = @{}          # Real-time perf metrics surfaced in the dashboard
+$script:LocalizationResources = $null      # Currently loaded localization strings
 if (-not $script:CurrentLanguage) {
     $script:CurrentLanguage = 'en'
 }
-$script:IsLanguageInitializing = $false
-$global:OptimizationCache = @{}
-$global:ActiveGames = @()
-$global:MenuMode = "Basic"  # Basic or Advanced
-$global:AutoOptimizeEnabled = $false
-$global:LastTimestamp = $null
-$global:CachedTimestamp = ""
-$global:LogBoxAvailable = $false
-$global:RegistryCache = @{}
-$global:LastOptimizationTime = $null  # Track when optimizations were last applied
+$script:IsLanguageInitializing = $false    # Prevents recursive language initialization
+$global:OptimizationCache = @{}            # Stores last-run optimization results
+$global:ActiveGames = @()                  # Names of currently detected games
+$global:MenuMode = 'Basic'                 # UI mode (Basic/Advanced)
+$global:AutoOptimizeEnabled = $false       # Flag for automatic game optimization
+$global:LastTimestamp = $null              # Timestamp caching for log entries
+$global:CachedTimestamp = ''               # Cached string representation of timestamp
+$global:LogBoxAvailable = $false           # Indicates whether UI log textbox is ready
+$global:RegistryCache = @{}                # Cache of registry writes to avoid duplicates
+$global:LastOptimizationTime = $null       # Last time optimizations were executed
 
 # ---------- .NET Framework 4.8 Compatibility Helper Functions ----------
 function Set-BorderBrushSafe {
@@ -69,21 +86,26 @@ function Set-BorderBrushSafe {
 
     if (-not $Element) { return }
 
+    try {
         # Check if element supports BorderBrush
         if ($Element.GetType().GetProperty("BorderBrush")) {
             Set-BrushPropertySafe -Target $Element -Property 'BorderBrush' -Value $BorderBrushValue -AllowTransparentFallback
-
         }
 
         # Set BorderThickness if provided and supported
         if ($BorderThicknessValue -and $Element.GetType().GetProperty("BorderThickness")) {
             $Element.BorderThickness = $BorderThicknessValue
         }
+    }
+    catch [System.InvalidOperationException] {
         # Sealed object exception - skip assignment
         Write-Verbose "BorderBrush assignment skipped due to sealed object (compatible with .NET Framework 4.8)"
+    }
+    catch {
         # Other exceptions - log but don't fail
         Write-Verbose "BorderBrush assignment failed: $($_.Exception.Message)"
     }
+}
 
 # ---------- CENTRALIZED THEME ARRAY - ONLY CHANGE HERE! ----------
 # ---------- COMPLETE THEME ARRAY - ALL COLORS CENTRALIZED! ----------
@@ -258,7 +280,9 @@ if ($PSScriptRoot) {
     $ScriptRoot = $PSScriptRoot
 } elseif ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
     $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
     $ScriptRoot = (Get-Location).Path
+}
 
 # Function moved to after helper functions to fix call order
 
@@ -351,9 +375,9 @@ function Add-LogToHistory {
         [string]$Category = 'General'
     )
 
+    try {
         if (-not $global:LogHistory -or -not ($global:LogHistory -is [System.Collections.IList])) {
             $global:LogHistory = [System.Collections.ArrayList]::new()
-
         }
 
         if (-not $global:MaxLogHistorySize -or $global:MaxLogHistorySize -lt 10) {
@@ -372,15 +396,28 @@ function Add-LogToHistory {
 
         while ($global:LogHistory.Count -gt $global:MaxLogHistorySize) {
             $global:LogHistory.RemoveAt(0)
-
         }
-
+    }
+    catch {
         # Silent fail to prevent logging issues
         Write-Verbose "Failed to add log to history: $($_.Exception.Message)"
     }
+}
+
 
 function Log {
-    param([string]$msg, [string]$Level = 'Info')
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Message,
+
+        [Parameter()]
+        [ValidateSet('Info','Success','Warning','Error','Debug','Trace','Context','ErrorContext')]
+        [string]$Level = 'Info'
+    )
+
+    $msg = $Message
 
     if (-not $global:LastTimestamp -or ((Get-Date) - $global:LastTimestamp).TotalMilliseconds -gt 100) {
         $global:CachedTimestamp = [DateTime]::Now.ToString('HH:mm:ss')
@@ -389,141 +426,102 @@ function Log {
 
     $logMessage = "[$global:CachedTimestamp] [$Level] $msg"
 
-    # Enhanced categorization and history tracking
     $category = Get-LogCategory -Message $msg
     Add-LogToHistory -Message $msg -Level $Level -Category $category
 
-    # Periodic log file optimization
-    if ((Get-Random -Maximum 100) -eq 1) {  # 1% chance per log entry
+    if ((Get-Random -Maximum 100) -eq 1) {
         Optimize-LogFile -MaxSizeMB 10
     }
 
-    # Enhanced activity logging with persistent file logging and administrator mode awareness
+    try {
         $logFilePath = Join-Path $ScriptRoot 'Koala-Activity.log'
-
-        # Additional reliability check: ensure directory exists
         $logDir = Split-Path $logFilePath -Parent
         if (-not (Test-Path $logDir)) {
             New-Item -Path $logDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
-
         }
 
-        # Enhanced file writing with retry mechanism
-        $maxRetries = 3
-        $retryCount = 0
-        $success = $false
+        $enhancedLogMessage = "[$global:CachedTimestamp] [$Level] [$category] $msg"
+        Add-Content -Path $logFilePath -Value $enhancedLogMessage -Encoding UTF8 -ErrorAction Stop
 
-        while (-not $success -and $retryCount -lt $maxRetries) {
-                # Enhanced log entry with category information
-                $enhancedLogMessage = "[$global:CachedTimestamp] [$Level] [$category] $msg"
-                Add-Content -Path $logFilePath -Value $enhancedLogMessage -Encoding UTF8 -ErrorAction Stop
-                $success = $true
-                $retryCount++
-                if ($retryCount -lt $maxRetries) {
-                    Start-Sleep -Milliseconds 100
-                } else {
-                    throw
-                }
-            }
-
-        # Verify file write was successful for critical operations
-        if ($Level -eq 'Error' -or $Level -eq 'Warning') {
+        if ($Level -in @('Error', 'Warning')) {
             $lastLine = Get-Content $logFilePath -Tail 1 -ErrorAction SilentlyContinue
             if ($lastLine -notmatch [regex]::Escape($msg)) {
                 throw "File verification failed - log entry may not have been written"
             }
         }
 
-        # Enhanced context logging for comprehensive user action tracking
         if ($msg -match "Theme|Game|Mode|Optimization|Service|System|Network|Settings|Backup|Import|Export|Search") {
-                $adminStatus = if (Get-Command Test-AdminPrivileges -ErrorAction SilentlyContinue) { Test-AdminPrivileges } else { "Unknown" }
-                $contextMessage = "[$global:CachedTimestamp] [Context] [$category] User action '$($msg.Split(' ')[0])' in $global:MenuMode mode with Admin: $adminStatus"
-                Add-Content -Path $logFilePath -Value $contextMessage -Encoding UTF8 -ErrorAction SilentlyContinue
+            $adminStatus = if (Get-Command Test-AdminPrivileges -ErrorAction SilentlyContinue) { Test-AdminPrivileges } else { 'Unknown' }
+            $contextMessage = "[$global:CachedTimestamp] [Context] [$category] User action '$($msg.Split(' ')[0])' in $global:MenuMode mode with Admin: $adminStatus"
+            Add-Content -Path $logFilePath -Value $contextMessage -Encoding UTF8 -ErrorAction SilentlyContinue
+            Add-LogToHistory -Message "User action '$($msg.Split(' ')[0])' in $global:MenuMode mode with Admin: $adminStatus" -Level 'Context' -Category $category
+        }
 
-                # Add to history as well
-                Add-LogToHistory -Message "User action '$($msg.Split(' ')[0])' in $global:MenuMode mode with Admin: $adminStatus" -Level "Context" -Category $category
-                # Ignore context logging errors to prevent circular issues
-            }
-
-        # Additional validation logging for critical operations
         if ($Level -eq 'Error') {
-                $errorContext = "[$global:CachedTimestamp] [ErrorContext] [$category] PowerShell: $($PSVersionTable.PSVersion), OS: $(if ($IsWindows -ne $null) { if ($IsWindows) {'Windows'} else {'Non-Windows'} } else {'Windows Legacy'})"
-                Add-Content -Path $logFilePath -Value $errorContext -Encoding UTF8 -ErrorAction SilentlyContinue
+            $platform = if ($IsWindows -ne $null) { if ($IsWindows) { 'Windows' } else { 'Non-Windows' } } else { 'Windows Legacy' }
+            $errorContext = "[$global:CachedTimestamp] [ErrorContext] [$category] PowerShell: $($PSVersionTable.PSVersion), OS: $platform"
+            Add-Content -Path $logFilePath -Value $errorContext -Encoding UTF8 -ErrorAction SilentlyContinue
+            Add-LogToHistory -Message "PowerShell: $($PSVersionTable.PSVersion), OS: $platform" -Level 'ErrorContext' -Category $category
+        }
+    }
+    catch {
+        $errorContext = ''
+        if ($_.Exception.Message -match 'Access.*denied|UnauthorizedAccess') {
+            $errorContext = ' (Insufficient permissions - try running as Administrator)'
+        }
+        elseif ($_.Exception.Message -match 'path.*not found|DirectoryNotFound') {
+            $errorContext = ' (Directory access issue - check script location)'
+        }
+        elseif ($_.Exception.Message -match 'file.*in use|sharing violation') {
+            $errorContext = ' (File in use - another instance may be running)'
+        }
 
-                # Add to history as well
-                Add-LogToHistory -Message "PowerShell: $($PSVersionTable.PSVersion), OS: $(if ($IsWindows -ne $null) { if ($IsWindows) {'Windows'} else {'Non-Windows'} } else {'Windows Legacy'})" -Level "ErrorContext" -Category $category
-                # Ignore additional context logging errors
-            }
-
-        # Enhanced error reporting for administrator mode and permission issues
-        $errorContext = ""
-        if ($_.Exception.Message -match "Access.*denied|UnauthorizedAccess") {
-            $errorContext = " (Insufficient permissions - try running as Administrator)"
-        } elseif ($_.Exception.Message -match "path.*not found|DirectoryNotFound") {
-            $errorContext = " (Directory access issue - check script location)"
-            $errorContext = " (File in use - another instance may be running)"
-
-        # Fallback to console with enhanced error context
-        Write-Host "LOG FILE ERROR: $($_.Exception.Message)$errorContext" -ForegroundColor Red
-        Write-Host $logMessage -ForegroundColor $(Get-LogColor $Level)
+        Write-Warning "LOG FILE ERROR: $($_.Exception.Message)$errorContext"
+        Write-Output $logMessage
+    }
 
     if ($global:LogBox -and $global:LogBoxAvailable) {
-        # Use Dispatcher.Invoke instead of BeginInvoke for more reliable UI updates
         try {
             $global:LogBox.Dispatcher.Invoke({
-                try {
-                    # Check if LogBox is still accessible
-                    if ($global:LogBox -and $global:LogBox.IsEnabled -ne $null) {
-                        $global:LogBox.AppendText("$logMessage`r`n")
-                        $global:LogBox.ScrollToEnd()
+                if ($global:LogBox -and $global:LogBox.IsEnabled -ne $null) {
+                    $global:LogBox.AppendText("$logMessage`r`n")
+                    $global:LogBox.ScrollToEnd()
 
-                        # Maintain detailed log backup for toggle functionality
-                        if (-not $global:DetailedLogBackup) {
-                            $global:DetailedLogBackup = ""
-                        }
-                        $global:DetailedLogBackup += "$logMessage`r`n"
-
-                        # If in compact mode, apply filtering
-                        if ($global:LogViewDetailed -eq $false) {
-                            if ($msg -match "Success|Error|Warning|Applied|Optimization") {
-                                # Important messages are shown in compact view
-
-                            } else {
-                                # Hide non-essential messages in compact view
-                                $currentText = $global:LogBox.Text
-                                $lines = $currentText -split "`r`n"
-                                $filteredLines = $lines | Where-Object {
-                                    $_ -match "Success|Error|Warning|Applied|Optimization"
-                                } | Select-Object -Last 20
-                                $global:LogBox.Text = ($filteredLines -join "`r`n")
-                            }
-                        }
-
-                        # Force immediate UI update to ensure text appears
-                        $global:LogBox.InvalidateVisual()
-                        $global:LogBox.UpdateLayout()
-
-                        # Process pending UI operations
-                        if ([System.Windows.Threading.Dispatcher]::CurrentDispatcher) {
-                            [System.Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke({}, [System.Windows.Threading.DispatcherPriority]::Render)
-                        }
-                    } else {
-                        throw [System.InvalidOperationException]::new("LogBox is unavailable")
+                    if (-not $global:DetailedLogBackup) {
+                        $global:DetailedLogBackup = ''
                     }
-            } catch {
-                $global:LogBoxAvailable = $false
-                Write-Host $logMessage -ForegroundColor $(Get-LogColor $Level)
-                Log "LogBox UI became unavailable: $($_.Exception.Message)" 'Warning'
-            }
+                    $global:DetailedLogBackup += "$logMessage`r`n"
+
+                    if ($global:LogViewDetailed -eq $false) {
+                        if ($msg -notmatch 'Success|Error|Warning|Applied|Optimization') {
+                            $lines = $global:LogBox.Text -split "`r`n"
+                            $filteredLines = $lines | Where-Object { $_ -match 'Success|Error|Warning|Applied|Optimization' } | Select-Object -Last 20
+                            $global:LogBox.Text = ($filteredLines -join "`r`n")
+                        }
+                    }
+
+                    $global:LogBox.InvalidateVisual()
+                    $global:LogBox.UpdateLayout()
+                    if ([System.Windows.Threading.Dispatcher]::CurrentDispatcher) {
+                        [System.Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke({}, [System.Windows.Threading.DispatcherPriority]::Render)
+                    }
+                }
+                else {
+                    throw [System.InvalidOperationException]::new('LogBox is unavailable')
+                }
             })
-        } catch {
-            $global:LogBoxAvailable = $false
-            Write-Host $logMessage -ForegroundColor $(Get-LogColor $Level)
-            Log "LogBox UI became unavailable: $($_.Exception.Message)" 'Warning'
         }
-    } else {
-        Write-Host $logMessage -ForegroundColor $(Get-LogColor $Level)
+        catch {
+            $global:LogBoxAvailable = $false
+            Write-Host $logMessage -ForegroundColor (Get-LogColor $Level)
+            Write-Verbose "LogBox UI became unavailable: $($_.Exception.Message)"
+        }
     }
+    else {
+        Write-Host $logMessage -ForegroundColor (Get-LogColor $Level)
+    }
+}
+
 
 # ---------- Essential Helper Functions (moved to top to fix call order) ----------
 function Test-AdminPrivileges {
@@ -551,11 +549,10 @@ function Get-SafeConfigPath {
         return Join-Path $global:CustomConfigPath $Filename
     }
 
-    # Check if current path is system32 or other sensitive location
     $currentPath = if ($ScriptRoot) { $ScriptRoot } else { (Get-Location).Path }
     $isAdmin = Test-AdminPrivileges
 
-    if ($isAdmin -and ($currentPath -match "system32|windows|program files" -or $currentPath.Length -lt 10)) {
+    if ($isAdmin -and ($currentPath -match 'system32|windows|program files' -or $currentPath.Length -lt 10)) {
         if (-not $script:SafeConfigDirectory) {
             $documentsRoot = try { [Environment]::GetFolderPath('MyDocuments') } catch { $null }
             if ([string]::IsNullOrWhiteSpace($documentsRoot)) {
@@ -571,8 +568,11 @@ function Get-SafeConfigPath {
         }
 
         if (-not (Test-Path $script:SafeConfigDirectory)) {
+            try {
                 New-Item -ItemType Directory -Path $script:SafeConfigDirectory -Force | Out-Null
                 Log "Created safe configuration directory: $script:SafeConfigDirectory" 'Info'
+            }
+            catch {
                 Log "Failed to create safe configuration directory: $script:SafeConfigDirectory - $($_.Exception.Message)" 'Warning'
             }
         }
@@ -581,6 +581,8 @@ function Get-SafeConfigPath {
     }
 
     return Join-Path $currentPath $Filename
+}
+
 
 # Initialize paths after function definition
 $BackupPath = Get-SafeConfigPath 'Koala-Backup.json'
@@ -594,7 +596,6 @@ function Test-StartupControls {
     #>
 
     $criticalControls = @{
-        # Navigation controls
         'btnNavDashboard' = $btnNavDashboard
         'btnNavBasicOpt' = $btnNavBasicOpt
         'btnNavAdvanced' = $btnNavAdvanced
@@ -602,8 +603,6 @@ function Test-StartupControls {
         'btnNavOptions' = $btnNavOptions
         'btnNavBackup' = $btnNavBackup
         'btnNavLog' = $btnNavLog
-
-        # Panels
         'panelDashboard' = $panelDashboard
         'panelBasicOpt' = $panelBasicOpt
         'panelAdvanced' = $panelAdvanced
@@ -614,8 +613,6 @@ function Test-StartupControls {
         'btnAdvancedNetwork' = $btnAdvancedNetwork
         'btnAdvancedSystem' = $btnAdvancedSystem
         'btnAdvancedServices' = $btnAdvancedServices
-
-        # Critical buttons mentioned in problem statement
         'btnInstalledGames' = $btnInstalledGames
         'btnSaveSettings' = $btnSaveSettings
         'btnLoadSettings' = $btnLoadSettings
@@ -633,8 +630,6 @@ function Test-StartupControls {
         'btnImportOptions' = $btnImportOptions
         'btnChooseBackupFolder' = $btnChooseBackupFolder
         'cmbOptionsLanguage' = $cmbOptionsLanguage
-
-        # System optimization and service management controls
         'btnOptimizeGame' = $btnOptimizeGame
         'btnDashQuickOptimize' = $btnDashQuickOptimize
         'btnBasicSystem' = $btnBasicSystem
@@ -645,24 +640,9 @@ function Test-StartupControls {
         'expanderNetworkTweaks' = $expanderNetworkTweaks
         'expanderSystemOptimizations' = $expanderSystemOptimizations
         'expanderServiceManagement' = $expanderServiceManagement
-
-        # Checkboxes for optimizations
         'chkAutoOptimize' = $chkAutoOptimize
-        'chkDashAutoOptimize' = $chkDashAutoOptimize
-        'chkGameDVR' = $chkGameDVR
-        'chkFullscreenOptimizations' = $chkFullscreenOptimizations
-        'chkGPUScheduling' = $chkGPUScheduling
-        'chkTimerResolution' = $chkTimerResolution
-        'chkGameMode' = $chkGameMode
-        'chkMPO' = $chkMPO
-        'chkGameDVRSystem' = $chkGameDVRSystem
-        'chkGPUSchedulingSystem' = $chkGPUSchedulingSystem
-        'chkFullscreenOptimizationsSystem' = $chkFullscreenOptimizationsSystem
-        'chkTimerResolutionSystem' = $chkTimerResolutionSystem
-        'chkGameModeSystem' = $chkGameModeSystem
-        'chkMPOSystem' = $chkMPOSystem
-
-        # Logging
+        'chkGamesAutoOptimize' = $chkGamesAutoOptimize
+        'chkAutoBackup' = $chkAutoBackup
         'LogBox' = $global:LogBox
     }
 
@@ -674,12 +654,12 @@ function Test-StartupControls {
         if ($control -eq $null) {
             $missingControls += $controlName
             Log "MISSING CONTROL: $controlName is null - event handlers will be skipped" 'Warning'
-        } else {
+        }
+        else {
             $availableControls += $controlName
         }
     }
 
-    # Log startup summary
     Log "STARTUP CONTROL VALIDATION COMPLETE" 'Info'
     Log "Available controls: $($availableControls.Count)/$($criticalControls.Count)" 'Info'
 
@@ -701,21 +681,26 @@ function Test-StartupControls {
             }
         }
 
-        # Provide UI feedback but do not block startup
-            $message = "⚠️ STARTUP VALIDATION: $($missingControls.Count) UI controls are missing.`n`nMissing: $($missingControls -join ', ')`n`nThe application will continue to run, but some features may not work properly.`n`nCheck the Activity Log for detailed fix suggestions."
-
-            # Only show message box if WPF is available
+        try {
+            $message = "⚠️ STARTUP VALIDATION: $($missingControls.Count) UI controls are missing.`n`nMissing: $($missingControls -join ', ')`n`nThe application will continue to run, but some features may not work properly.`n`nCheck the Activity Log for detailed fix suggestions."
             if ([System.Windows.MessageBox] -and $form) {
-                [System.Windows.MessageBox]::Show($message, "Startup Control Validation", 'OK', 'Warning')
-
-            } else {
+                [System.Windows.MessageBox]::Show($message, 'Startup Control Validation', 'OK', 'Warning')
+            }
+            else {
                 Log "UI feedback not available - continuing with console logging only" 'Info'
             }
+        }
+        catch {
             Log "Could not display UI feedback for missing controls: $($_.Exception.Message)" 'Warning'
+        }
 
         return $false
-        Log "[OK] All critical controls found and bound successfully" 'Success'
-        return $true
+    }
+
+    Log "[OK] All critical controls found and bound successfully" 'Success'
+    return $true
+}
+
 $SettingsPath = Get-SafeConfigPath 'koala-settings.cfg'
 
 # ---------- UI Cloning and Mirroring Helpers (moved forward for availability) ----------
@@ -726,6 +711,7 @@ function Clone-UIElement {
         $Element
     )
 
+    try {
         $xaml = [System.Windows.Markup.XamlWriter]::Save($Element)
         $stringReader = New-Object System.IO.StringReader $xaml
         $xmlReader = [System.Xml.XmlReader]::Create($stringReader)
@@ -733,9 +719,13 @@ function Clone-UIElement {
         $xmlReader.Close()
         $stringReader.Close()
         return $clone
+    }
+    catch {
         Write-Verbose "Clone-UIElement failed: $($_.Exception.Message)"
         return $null
     }
+}
+
 
 function Copy-TagValue {
     param($Value)
@@ -784,11 +774,15 @@ function New-ClonedCheckBox {
     try { $clone.IsChecked = $Source.IsChecked } catch { }
     try { $clone.ToolTip = $Source.ToolTip } catch { }
 
+    try {
         $clone.Tag = Copy-TagValue -Value $Source.Tag
-    } catch {
+    }
+    catch {
         Write-Verbose "Failed to copy checkbox Tag value: $($_.Exception.Message)"
+    }
 
     return $clone
+}
 
 function Copy-ChildElement {
     param([System.Windows.UIElement]$Source)
@@ -821,13 +815,13 @@ function Copy-ChildElement {
 function Update-GameListMirrors {
     if (-not $script:PrimaryGameListPanel -or -not $script:DashboardGameListPanel) { return }
 
+    try {
         $script:DashboardGameListPanel.Children.Clear()
         foreach ($child in $script:PrimaryGameListPanel.Children) {
             if ($child -is [System.Windows.Controls.TextBlock]) {
                 $clonedText = New-ClonedTextBlock -Source $child
                 if ($clonedText) { $script:DashboardGameListPanel.Children.Add($clonedText) }
                 continue
-
             }
 
             if ($child -is [System.Windows.Controls.Border]) {
@@ -853,8 +847,12 @@ function Update-GameListMirrors {
                 $script:DashboardGameListPanel.Children.Add($fallback)
             }
         }
+    }
+    catch {
         Write-Verbose "Update-GameListMirrors failed: $($_.Exception.Message)"
     }
+}
+
 
 # Resolve a color-like value (string, brush, PSObject) to a usable color string.
 function Get-ColorStringFromValue {
@@ -917,6 +915,7 @@ function Get-ColorStringFromValue {
     }
 
     try { return [string]$ColorValue } catch { return $null }
+}
 
 # Normalize theme tables so color values resolve to reusable brush instances.
 function Normalize-ThemeColorTable {
@@ -931,7 +930,10 @@ function Normalize-ThemeColorTable {
 
         if ($value -is [string]) {
             $stringBrush = $null
+            try {
                 $stringBrush = New-SolidColorBrushSafe $value
+            }
+            catch {
                 $stringBrush = $null
             }
 
@@ -944,23 +946,30 @@ function Normalize-ThemeColorTable {
         }
 
         if ($value -is [bool]) { continue }
+
         if ($value -is [System.Windows.Media.Brush]) {
+            try {
                 if ($value -is [System.Windows.Freezable] -and -not $value.IsFrozen) {
                     $value.Freeze()
-
                 }
+            }
+            catch {
                 Write-Verbose "Normalize-ThemeColorTable: Failed to freeze brush for key '$key'"
             }
             continue
         }
+
         if ($value -is [int] -or $value -is [double] -or $value -is [decimal]) { continue }
 
         $resolved = Get-ColorStringFromValue $value
         if (-not [string]::IsNullOrWhiteSpace($resolved)) {
             $Theme[$key] = $resolved
         }
+    }
 
     return $Theme
+}
+
 
 # Creates a cloneable brush instance from a variety of incoming values.
 function Resolve-BrushInstance {
@@ -977,17 +986,30 @@ function Resolve-BrushInstance {
     }
 
     if ($current -is [System.Windows.Media.Brush]) {
+        try {
             $clone = if ($current -is [System.Windows.Freezable]) { $current.Clone() } else { $current }
             if ($clone -is [System.Windows.Freezable] -and -not $clone.IsFrozen) {
-                try { $clone.Freeze() } catch { }
-
+                $clone.Freeze()
             }
             return $clone
-        } catch {
+        }
+        catch {
             return $current
         }
+    }
+
+    if ($current -is [string]) {
+        return New-SolidColorBrushSafe $current
+    }
+
+    $resolved = Get-ColorStringFromValue $current
+    if ($resolved) {
+        return New-SolidColorBrushSafe $resolved
+    }
 
     return $null
+}
+
 
 # Creates a frozen SolidColorBrush from a color-like value when possible.
 function New-SolidColorBrushSafe {
@@ -1001,6 +1023,7 @@ function New-SolidColorBrushSafe {
     }
 
     if ($existingBrush -is [System.Windows.Media.Brush]) {
+        try {
             $colorText = $existingBrush.ToString()
             if (-not [string]::IsNullOrWhiteSpace($colorText)) {
                 $colorCandidate = [System.Windows.Media.ColorConverter]::ConvertFromString($colorText)
@@ -1008,9 +1031,10 @@ function New-SolidColorBrushSafe {
                     $fromBrush = New-Object System.Windows.Media.SolidColorBrush $colorCandidate
                     $fromBrush.Freeze()
                     return $fromBrush
-
                 }
             }
+        }
+        catch {
             Write-Verbose "Failed to coerce brush value '$existingBrush' to SolidColorBrush: $($_.Exception.Message)"
         }
     }
@@ -1026,25 +1050,33 @@ function New-SolidColorBrushSafe {
 
     $converter = Get-SharedBrushConverter
     if ($converter) {
+        try {
             $converted = $converter.ConvertFromString($resolvedValue)
             $convertedBrush = Resolve-BrushInstance $converted
             if ($convertedBrush -is [System.Windows.Media.SolidColorBrush]) {
                 return $convertedBrush
-
             }
+        }
+        catch {
             Write-Verbose "BrushConverter could not convert '$resolvedValue' to SolidColorBrush: $($_.Exception.Message)"
         }
+    }
 
+    try {
         $color = [System.Windows.Media.ColorConverter]::ConvertFromString($resolvedValue)
         if ($color -is [System.Windows.Media.Color]) {
             $brush = New-Object System.Windows.Media.SolidColorBrush $color
             $brush.Freeze()
             return $brush
-
         }
+    }
+    catch {
         Write-Verbose "Failed to convert '$resolvedValue' to SolidColorBrush: $($_.Exception.Message)"
+    }
 
     return $null
+}
+
 
 function Get-SharedBrushConverter {
     if (-not $script:SharedBrushConverter -or $script:SharedBrushConverter.GetType().FullName -ne 'System.Windows.Media.BrushConverter') {
@@ -1063,9 +1095,13 @@ function Set-ShapeFillSafe {
 
     if (-not $Shape) { return }
 
+    try {
         Set-BrushPropertySafe -Target $Shape -Property 'Fill' -Value $Value -AllowTransparentFallback
+    }
+    catch {
         Write-Verbose "Set-ShapeFillSafe failed: $($_.Exception.Message)"
     }
+}
 
 # Centralized helper to assign Brush-like theme values to WPF dependency properties.
 function Set-BrushPropertySafe {
@@ -1079,87 +1115,95 @@ function Set-BrushPropertySafe {
     if (-not $Target) { return }
     if ([string]::IsNullOrWhiteSpace($Property)) { return }
 
-        $resolvedValue = $Value
-        $previousValue = $null
-        while ($resolvedValue -is [System.Management.Automation.PSObject] -and $resolvedValue -ne $previousValue) {
-            $previousValue = $resolvedValue
-            $resolvedValue = $resolvedValue.PSObject.BaseObject
+    $resolvedValue = $Value
+    $previousValue = $null
+    while ($resolvedValue -is [System.Management.Automation.PSObject] -and $resolvedValue -ne $previousValue) {
+        $previousValue = $resolvedValue
+        $resolvedValue = $resolvedValue.PSObject.BaseObject
+    }
 
-        }
+    $brush = Resolve-BrushInstance $resolvedValue
+    if (-not $brush) {
+        $brush = New-SolidColorBrushSafe $resolvedValue
+    }
 
-        $brush = Resolve-BrushInstance $resolvedValue
-        if (-not $brush) {
-            $brush = New-SolidColorBrushSafe $resolvedValue
-        }
-        $previousBrush = $null
-        while ($brush -is [System.Management.Automation.PSObject] -and $brush -ne $previousBrush) {
-            $previousBrush = $brush
-            $brush = $brush.PSObject.BaseObject
-        }
+    $previousBrush = $null
+    while ($brush -is [System.Management.Automation.PSObject] -and $brush -ne $previousBrush) {
+        $previousBrush = $brush
+        $brush = $brush.PSObject.BaseObject
+    }
 
-        if ($brush -is [System.Windows.Media.Brush]) {
+    if ($brush -is [System.Windows.Media.Brush]) {
+        try {
             if ($brush -is [System.Windows.Freezable] -and $brush.IsFrozen) {
                 $Target.$Property = $brush.Clone()
-            } else {
+            }
+            else {
                 $Target.$Property = $brush
             }
             return
         }
+        catch {
+            Write-Verbose "Set-BrushPropertySafe: failed to apply resolved brush to property '$Property' on $($Target.GetType().Name): $($_.Exception.Message)"
+        }
+    }
 
-        $colorValue = Get-ColorStringFromValue $resolvedValue
-        $previousColor = $null
-        while ($colorValue -is [System.Management.Automation.PSObject] -and $colorValue -ne $previousColor) {
-            $previousColor = $colorValue
-            $colorValue = $colorValue.PSObject.BaseObject
+    $colorString = Get-ColorStringFromValue $resolvedValue
+    if (-not [string]::IsNullOrWhiteSpace($colorString)) {
+        $converter = Get-SharedBrushConverter
+        if ($converter) {
+            try {
+                $converted = $converter.ConvertFromString($colorString)
+                $convertedBrush = Resolve-BrushInstance $converted
+                if (-not $convertedBrush) {
+                    $convertedBrush = New-SolidColorBrushSafe $converted
+                }
+
+                if ($convertedBrush -is [System.Windows.Media.Brush]) {
+                    if ($convertedBrush -is [System.Windows.Freezable] -and $convertedBrush.IsFrozen) {
+                        $Target.$Property = $convertedBrush.Clone()
+                    }
+                    else {
+                        $Target.$Property = $convertedBrush
+                    }
+                    return
+                }
+            }
+            catch {
+                Write-Verbose "Set-BrushPropertySafe: converter could not produce brush for '$colorString': $($_.Exception.Message)"
+            }
         }
 
-        $colorString = $null
-        if ($null -ne $colorValue) {
-            if ($colorValue -is [string]) {
-                $colorString = $colorValue
-            } else {
-                try { $colorString = [string]$colorValue } catch { $colorString = $null }
-            }
-
-        if (-not [string]::IsNullOrWhiteSpace($colorString)) {
-            $converter = Get-SharedBrushConverter
-            if ($converter) {
-                    $converted = $converter.ConvertFromString($colorString)
-                    $convertedBrush = Resolve-BrushInstance $converted
-                    if (-not $convertedBrush) {
-                        $convertedBrush = New-SolidColorBrushSafe $converted
-
-                    }
-
-                    if ($convertedBrush -is [System.Windows.Media.Brush]) {
-                        if ($convertedBrush -is [System.Windows.Freezable] -and $convertedBrush.IsFrozen) {
-                            $Target.$Property = $convertedBrush.Clone()
-                        } else {
-                            $Target.$Property = $convertedBrush
-                        }
-                        return
-                    }
-                    Write-Verbose "BrushConverter fallback for property '$Property' failed: $($_.Exception.Message)"
-                }
-
-            $fallbackBrush = New-SolidColorBrushSafe $colorString
-            if ($fallbackBrush -is [System.Windows.Media.Brush]) {
-                if ($fallbackBrush -is [System.Windows.Freezable] -and $fallbackBrush.IsFrozen) {
-                    $Target.$Property = $fallbackBrush.Clone()
-                } else {
-                    $Target.$Property = $fallbackBrush
-                }
-                return
-
         if ($AllowTransparentFallback) {
-            $transparentBrush = [System.Windows.Media.Brushes]::Transparent
-            if ($transparentBrush -is [System.Windows.Freezable] -and $transparentBrush.IsFrozen) {
-                $Target.$Property = $transparentBrush.Clone()
-            } else {
-                $Target.$Property = $transparentBrush
+            try {
+                $fallbackBrush = New-SolidColorBrushSafe $colorString
+                if ($fallbackBrush) {
+                    $Target.$Property = $fallbackBrush
+                    return
+                }
             }
-            try { $Target.$Property = $null } catch { }
-        Write-Verbose "Set-BrushPropertySafe failed for property '$Property' on $($Target.GetType().Name): $($_.Exception.Message)"
+            catch {
+                Write-Verbose "Set-BrushPropertySafe: fallback conversion failed for '$colorString': $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if ($AllowTransparentFallback) {
+        try {
+            $transparent = [System.Windows.Media.Brushes]::Transparent
+            if ($transparent -is [System.Windows.Freezable] -and $transparent.IsFrozen) {
+                $Target.$Property = $transparent.Clone()
+            }
+            else {
+                $Target.$Property = $transparent
+            }
+        }
+        catch {
+            Write-Verbose "Set-BrushPropertySafe: unable to apply transparent fallback for property '$Property' on $($Target.GetType().Name): $($_.Exception.Message)"
+        }
+    }
+}
+
 
 function Convert-ToBrushResource {
     param(
@@ -1171,28 +1215,37 @@ function Convert-ToBrushResource {
 
     $probe = New-Object System.Windows.Controls.Border
 
+    try {
         if ($AllowTransparentFallback) {
             Set-BrushPropertySafe -Target $probe -Property 'Background' -Value $Value -AllowTransparentFallback
-
-        } else {
+        }
+        else {
             Set-BrushPropertySafe -Target $probe -Property 'Background' -Value $Value
         }
+    }
+    catch {
         return $null
+    }
 
     $result = $probe.Background
     if ($null -eq $result) { return $null }
 
     if ($result -is [System.Windows.Freezable]) {
+        try {
             $clone = $result.Clone()
             if ($clone -is [System.Windows.Freezable] -and -not $clone.IsFrozen) {
-                try { $clone.Freeze() } catch { }
-
+                $clone.Freeze()
             }
             return $clone
-        } catch {
+        }
+        catch {
             return $result
+        }
+    }
 
     return $result
+}
+
 
 function Normalize-BrushResources {
     param(
@@ -1206,7 +1259,8 @@ function Normalize-BrushResources {
     $targetKeys = @()
     if ($Keys -and $Keys.Count -gt 0) {
         $targetKeys = $Keys
-    } else {
+    }
+    else {
         $targetKeys = @($Resources.Keys)
     }
 
@@ -1216,10 +1270,11 @@ function Normalize-BrushResources {
         $resourceValue = $Resources[$key]
         if ($resourceValue -is [System.Windows.Media.Brush]) { continue }
 
-        if ($AllowTransparentFallback) {
-            $normalizedBrush = Convert-ToBrushResource -Value $resourceValue -AllowTransparentFallback
-        } else {
-            $normalizedBrush = Convert-ToBrushResource -Value $resourceValue
+        $normalizedBrush = if ($AllowTransparentFallback) {
+            Convert-ToBrushResource -Value $resourceValue -AllowTransparentFallback
+        }
+        else {
+            Convert-ToBrushResource -Value $resourceValue
         }
 
         if ($normalizedBrush -is [System.Windows.Media.Brush]) {
@@ -1229,8 +1284,13 @@ function Normalize-BrushResources {
 
         if ($AllowTransparentFallback) {
             $Resources[$key] = [System.Windows.Media.Brushes]::Transparent
-        } else {
+        }
+        else {
             Write-Verbose "Normalize-BrushResources skipped '$key' due to unresolved brush value"
+        }
+    }
+}
+
 
 function Normalize-ElementBrushProperties {
     param([System.Windows.DependencyObject]$Element)
@@ -1251,20 +1311,19 @@ function Normalize-ElementBrushProperties {
     )
 
     foreach ($propertyName in $brushPropertyNames) {
-            $propertyInfo = $Element.GetType().GetProperty($propertyName)
-            $propertyInfo = $null
-        }
-
+        $propertyInfo = $null
+        try { $propertyInfo = $Element.GetType().GetProperty($propertyName) } catch { $propertyInfo = $null }
         if (-not $propertyInfo -or -not $propertyInfo.CanRead -or -not $propertyInfo.CanWrite) { continue }
 
-            $currentValue = $propertyInfo.GetValue($Element, $null)
-            continue
-        }
-
+        $currentValue = $null
+        try { $currentValue = $propertyInfo.GetValue($Element, $null) } catch { $currentValue = $null }
         if ($null -eq $currentValue) { continue }
         if ($currentValue -is [System.Windows.Media.Brush]) { continue }
 
         Set-BrushPropertySafe -Target $Element -Property $propertyName -Value $currentValue -AllowTransparentFallback
+    }
+}
+
 
 function Normalize-VisualTreeBrushes {
     param([System.Windows.DependencyObject]$Root)
@@ -1277,21 +1336,17 @@ function Normalize-VisualTreeBrushes {
 
     while ($stack.Count -gt 0) {
         $current = $stack.Pop()
-
         if ($current -isnot [System.Windows.DependencyObject]) { continue }
 
-            $hash = [System.Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($current)
-            continue
-        }
-
+        $hash = $null
+        try { $hash = [System.Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($current) } catch { $hash = $null }
+        if ($hash -eq $null) { continue }
         if (-not $visited.Add($hash)) { continue }
 
         Normalize-ElementBrushProperties -Element $current
 
         $childCount = 0
-            $childCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($current)
-            $childCount = 0
-        }
+        try { $childCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($current) } catch { $childCount = 0 }
 
         for ($i = 0; $i -lt $childCount; $i++) {
             $child = $null
@@ -1299,12 +1354,19 @@ function Normalize-VisualTreeBrushes {
             if ($child) { $stack.Push($child) }
         }
 
+        try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($current)) {
                 if ($logicalChild -is [System.Windows.DependencyObject]) {
                     $stack.Push($logicalChild)
-
                 }
             }
+        }
+        catch {
+            # Ignore logical tree traversal issues
+        }
+    }
+}
+
 
 # ---------- Theme and Styling Helpers (moved forward for availability) ----------
 function Find-AllControlsOfType {
@@ -1323,7 +1385,8 @@ function Find-AllControlsOfType {
             if ($typeName.StartsWith('[') -and $typeName.EndsWith(']')) {
                 $typeName = $typeName.Trim('[', ']')
             }
-        } elseif ($ControlType) {
+        }
+        elseif ($ControlType) {
             $typeName = $ControlType.ToString()
         }
 
@@ -1348,23 +1411,54 @@ function Find-AllControlsOfType {
         }
     }
 
-    if (-not $ControlType -or $ControlType -isnot [Type]) {
-        return
+    if (-not $ControlType -or $ControlType -isnot [Type]) { return }
+
+    if ($Parent -is $ControlType) {
+        $Collection.Value += $Parent
     }
 
-        if ($Parent -is $ControlType) {
-            $Collection.Value += $Parent
+    $childCandidates = @()
 
+    if ($Parent.Children) {
+        foreach ($child in $Parent.Children) {
+            if ($child) { $childCandidates += $child }
+        }
+    }
+
+    if ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
+        $childCandidates += $Parent.Content
+    }
+
+    if ($Parent.Child -and $Parent.Child -is [System.Windows.UIElement]) {
+        $childCandidates += $Parent.Child
+    }
+
+    if ($Parent -is [System.Windows.DependencyObject]) {
+        $visualCount = 0
+        try { $visualCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Parent) } catch { $visualCount = 0 }
+        for ($i = 0; $i -lt $visualCount; $i++) {
+            $visualChild = $null
+            try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $i) } catch { $visualChild = $null }
+            if ($visualChild) { $childCandidates += $visualChild }
         }
 
-        if ($Parent.Children) {
-            foreach ($child in $Parent.Children) {
-                Find-AllControlsOfType -Parent $child -ControlType $ControlType -Collection $Collection
+        try {
+            foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
+                if ($logicalChild -is [System.Windows.DependencyObject]) {
+                    $childCandidates += $logicalChild
+                }
             }
-        } elseif ($Parent.Content -and $Parent.Content -is [System.Windows.UIElement]) {
-            Find-AllControlsOfType -Parent $Parent.Content -ControlType $ControlType -Collection $Collection
-            Find-AllControlsOfType -Parent $Parent.Child -ControlType $ControlType -Collection $Collection
-        # Continue searching even if error occurs with specific element
+        }
+        catch {
+            # Ignore logical tree issues
+        }
+    }
+
+    foreach ($childCandidate in $childCandidates) {
+        Find-AllControlsOfType -Parent $childCandidate -ControlType $ControlType -Collection $Collection
+    }
+}
+
 
 function Set-StackPanelChildSpacing {
     param(
@@ -1389,31 +1483,34 @@ function Set-StackPanelChildSpacing {
         $newMargin = [System.Windows.Thickness]::new($margin.Left, $margin.Top, $margin.Right, $margin.Bottom)
 
         if ($Panel.Orientation -eq [System.Windows.Controls.Orientation]::Horizontal) {
-            $current = $margin.Right
             if ($index -lt $count - 1) {
-                if ([math]::Abs($current) -lt 0.01) {
-                    $newMargin.Right = $Spacing
-                } elseif ($current -lt $Spacing) {
+                if ($newMargin.Right -lt $Spacing) {
                     $newMargin.Right = $Spacing
                 }
-            } else {
-                if ([math]::Abs($current) -lt 0.01) {
+            }
+            else {
+                if ($newMargin.Right -ne 0) {
                     $newMargin.Right = 0
                 }
             }
-        } else {
-            $current = $margin.Bottom
+        }
+        else {
             if ($index -lt $count - 1) {
-                if ([math]::Abs($current) -lt 0.01) {
-                    $newMargin.Bottom = $Spacing
-                } elseif ($current -lt $Spacing) {
+                if ($newMargin.Bottom -lt $Spacing) {
                     $newMargin.Bottom = $Spacing
                 }
-                if ([math]::Abs($current) -lt 0.01) {
+            }
+            else {
+                if ($newMargin.Bottom -ne 0) {
                     $newMargin.Bottom = 0
                 }
+            }
+        }
 
         $child.Margin = $newMargin
+    }
+}
+
 
 function Set-GridColumnSpacing {
     param(
@@ -2315,6 +2412,7 @@ function Switch-Theme {
 
 # ---------- WinMM Timer (1ms precision) ----------
 if (-not ([System.Management.Automation.PSTypeName]'WinMM').Type) {
+    try {
         Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -2326,11 +2424,15 @@ public static class WinMM {
 
 }
 '@ -ErrorAction Stop
+    }
+    catch {
         Write-Verbose "WinMM timer API not available: $($_.Exception.Message)"
     }
+}
 
 # ---------- Performance Monitoring API ----------
 if (-not ([System.Management.Automation.PSTypeName]'PerfMon').Type) {
+    try {
         Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -2356,8 +2458,11 @@ public static class PerfMon {
     }
 }
 '@ -ErrorAction Stop
+    }
+    catch {
         Write-Verbose "Performance monitoring API not available: $($_.Exception.Message)"
     }
+}
 
 # ---------- System Health Monitoring and Alerts ----------
 $global:SystemHealthData = @{
@@ -2372,174 +2477,159 @@ $global:SystemHealthData = @{
 }
 
 function Get-SystemHealthStatus {
-    <#
-    .SYNOPSIS
-    Comprehensive system health monitoring with performance analysis and recommendations
-    .DESCRIPTION
-    Analyzes system health across multiple dimensions and provides actionable recommendations
-    #>
-
-        $healthData = @{
-            OverallScore = 100
-            Issues = @()
-            Warnings = @()
-            Recommendations = @()
-            Status = "Excellent"
-            Metrics = @{}
-
+    try {
+        $healthData = [ordered]@{
+            LastHealthCheck   = Get-Date
+            HealthStatus      = 'Good'
+            HealthWarnings    = @()
+            HealthScore       = 100
+            Recommendations   = @()
+            Issues            = @()
+            Metrics           = @{}
+            LastResult        = $null
         }
 
-        # 1. Memory Health Check - MemoryUsagePercent gt 90 triggers Critical memory usage alerts
-        $memMetrics = Get-SystemPerformanceMetrics
-        if ($memMetrics.MemoryUsagePercent) {
-            $healthData.Metrics.MemoryUsage = $memMetrics.MemoryUsagePercent
-
-            if ($memMetrics.MemoryUsagePercent -gt 90) {
-                $healthData.Issues += "Critical memory usage: $($memMetrics.MemoryUsagePercent)%"
-                $healthData.Recommendations += "Close unnecessary applications to free memory"
-                $healthData.OverallScore -= 20  # OverallScore minus 20 for critical memory
-            } elseif ($memMetrics.MemoryUsagePercent -gt 80) {
-                $healthData.Warnings += "High memory usage: $($memMetrics.MemoryUsagePercent)%"
-                $healthData.Recommendations += "Consider closing some applications for better gaming performance"
-                $healthData.OverallScore -= 10  # OverallScore minus 10 for high memory
+        try {
+            $cpuInfo = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop
+            $cpuLoad = ($cpuInfo | Measure-Object -Property LoadPercentage -Average).Average
+            if ($cpuLoad -ne $null) {
+                $cpuLoad = [math]::Round([double]$cpuLoad, 0)
+                $healthData.Metrics['CpuLoadPercent'] = $cpuLoad
+                if ($cpuLoad -gt 85) {
+                    $healthData.HealthWarnings += 'High CPU load detected'
+                    $healthData.Recommendations += 'Close background applications to reduce CPU usage'
+                    $healthData.HealthScore -= 10
+                }
             }
         }
+        catch {
+            Write-Verbose "CPU health check failed: $($_.Exception.Message)"
+        }
 
-        # 2. CPU Health Check - CpuUsage gt 90 triggers Critical CPU usage alerts
-        if ($memMetrics.CpuUsage) {
-            $healthData.Metrics.CpuUsage = $memMetrics.CpuUsage
-
-            if ($memMetrics.CpuUsage -gt 90) {
-                $healthData.Issues += "Critical CPU usage: $($memMetrics.CpuUsage)%"
-                $healthData.Recommendations += "Check for background processes consuming CPU"
-                $healthData.OverallScore -= 15  # OverallScore minus 15 for critical CPU
-            } elseif ($memMetrics.CpuUsage -gt 75) {
-                $healthData.Warnings += "High CPU usage: $($memMetrics.CpuUsage)%"
-                $healthData.Recommendations += "Monitor CPU-intensive applications"
-                $healthData.OverallScore -= 8
-            }
-
-        # 3. Disk Space Health Check - REMOVED due to PowerShell parser errors
-        # The following disk space health check code has been commented out to resolve parsing issues:
-        # - Removed variables: $freeSpaceGB, $freeSpacePercent
-        # - Removed problematic string formatting: ($freeSpaceGB GB)
-        # - Removed healthData.Issues, healthData.Warnings, healthData.Recommendations for disk space
-        <#
-            $systemDrive = $env:SystemDrive
-            $driveInfo = Get-WmiObject -Class Win32_LogicalDisk -Filter "DeviceID='$systemDrive'" -ErrorAction SilentlyContinue
-            if ($driveInfo) {
-                $freeSpaceGB = [math]::Round($driveInfo.FreeSpace / 1GB, 2)
-                $totalSpaceGB = [math]::Round($driveInfo.Size / 1GB, 2)
-                $freeSpacePercent = [math]::Round(($driveInfo.FreeSpace / $driveInfo.Size) * 100, 1)
-
-                $healthData.Metrics.DiskFreeSpace = $freeSpacePercent
-
-                if ($freeSpacePercent -lt 10) {
-                    $healthData.Issues += "Critical disk space: $freeSpacePercent% free ($freeSpaceGB GB)"
-                    $healthData.Recommendations += "Free up disk space immediately to prevent system issues"
-                    $healthData.OverallScore -= 25
-
-                } elseif ($freeSpacePercent -lt 20) {
-                    $healthData.Warnings += "Low disk space: $freeSpacePercent% free ($freeSpaceGB GB)"
-                    $healthData.Recommendations += "Consider cleaning up temporary files and uninstalling unused programs"
-                    $healthData.OverallScore -= 12
-                }
-            Log "Warning: Could not check disk space: $($_.Exception.Message)" 'Warning'
-        #>
-
-        # 4. Running Processes Health Check - processCount gt 200 analysis and optimization detection
-            $processCount = (Get-Process).Count
-            $healthData.Metrics.ProcessCount = $processCount
-
-            if ($processCount -gt 200) {
-                $healthData.Warnings += "High number of running processes: $processCount"
-                $healthData.Recommendations += "Consider using Task Manager to close unnecessary processes"
-                $healthData.OverallScore -= 8
-
-            }
-
-            # Check for known problematic processes
-            $problematicProcesses = Get-Process | Where-Object {
-                $_.ProcessName -match "miner|crypto|torrent" -and $_.WorkingSet -gt 100MB
-            }
-
-            if ($problematicProcesses) {
-                $healthData.Warnings += "Detected potentially problematic processes affecting gaming performance"
-                $healthData.Recommendations += "Review and close mining, crypto, or torrent applications while gaming"
-                $healthData.OverallScore -= 15
-            }
-            Log "Warning: Could not analyze running processes: $($_.Exception.Message)" 'Warning'
-
-        # 5. Windows Update Health Check - Microsoft.Update.Session for pendingUpdates analysis
-            $updateSession = New-Object -ComObject Microsoft.Update.Session -ErrorAction SilentlyContinue
-            if ($updateSession) {
-                $updateSearcher = $updateSession.CreateUpdateSearcher()
-                $pendingUpdates = $updateSearcher.Search("IsInstalled=0 and IsHidden=0").Updates.Count
-
-                if ($pendingUpdates -gt 0) {
-                    $healthData.Metrics.PendingUpdates = $pendingUpdates
-                    $healthData.Warnings += "$pendingUpdates pending Windows updates"
-                    $healthData.Recommendations += "Install pending Windows updates for security and performance improvements"
-                    $healthData.OverallScore -= 5
-
+        try {
+            $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+            $totalMemory = [double]$osInfo.TotalVisibleMemorySize
+            $freeMemory = [double]$osInfo.FreePhysicalMemory
+            if ($totalMemory -gt 0) {
+                $usedPercent = [math]::Round((($totalMemory - $freeMemory) / $totalMemory) * 100, 0)
+                $healthData.Metrics['MemoryUsagePercent'] = $usedPercent
+                if ($usedPercent -gt 85) {
+                    $healthData.HealthWarnings += 'High RAM usage detected'
+                    $healthData.Recommendations += 'Close unused applications to free up RAM'
+                    $healthData.HealthScore -= 10
                 }
             }
-            # Silent fail for Windows Update check
+        }
+        catch {
+            Write-Verbose "Memory health check failed: $($_.Exception.Message)"
+        }
 
-        # 6. Gaming Optimization Status - GameBar AllowAutoGameMode and HwSchMode validation
-            $gameMode = Get-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\GameBar" -Name "AllowAutoGameMode" -ErrorAction SilentlyContinue
+        try {
+            $systemDrive = (Get-Item -Path Env:SystemDrive).Value
+            $driveInfo = Get-PSDrive -Name $systemDrive.TrimEnd(':') -ErrorAction Stop
+            $freePercent = [math]::Round(($driveInfo.Free / $driveInfo.UsedAndFree) * 100, 0)
+            $healthData.Metrics['SystemDriveFreePercent'] = $freePercent
+            if ($freePercent -lt 15) {
+                $healthData.HealthWarnings += 'Low free space on system drive'
+                $healthData.Recommendations += 'Free up disk space on the system drive to ensure stable performance'
+                $healthData.HealthScore -= 10
+            }
+        }
+        catch {
+            Write-Verbose "Disk space check failed: $($_.Exception.Message)"
+        }
+
+        try {
+            $pendingUpdates = Get-CimInstance -Namespace root\cimv2 -ClassName Win32_QuickFixEngineering -ErrorAction Stop
+            $lastUpdate = $pendingUpdates | Sort-Object -Property InstalledOn -Descending | Select-Object -First 1
+            if ($lastUpdate -and $lastUpdate.InstalledOn) {
+                $healthData.Metrics['LastUpdateInstalledOn'] = $lastUpdate.InstalledOn
+            }
+        }
+        catch {
+            Write-Verbose "Windows update check failed: $($_.Exception.Message)"
+        }
+
+        try {
+            $gameMode = Get-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\GameBar' -Name 'AllowAutoGameMode' -ErrorAction SilentlyContinue
             if (-not $gameMode -or $gameMode.AllowAutoGameMode -ne 1) {
-                $healthData.Warnings += "Windows Game Mode is not enabled"
-                $healthData.Recommendations += "Enable Game Mode in Windows Settings for better gaming performance"
-                $healthData.OverallScore -= 5
-
+                $healthData.HealthWarnings += 'Windows Game Mode is disabled'
+                $healthData.Recommendations += 'Enable Windows Game Mode for improved gaming responsiveness'
+                $healthData.HealthScore -= 5
             }
+        }
+        catch {
+            Write-Verbose "Game Mode check failed: $($_.Exception.Message)"
+        }
 
-            $hardwareScheduling = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" -Name "HwSchMode" -ErrorAction SilentlyContinue
-            if (-not $hardwareScheduling -or $hardwareScheduling.HwSchMode -ne 2) {
-                $healthData.Warnings += "Hardware GPU Scheduling is not enabled"
-                $healthData.Recommendations += "Enable Hardware GPU Scheduling for improved graphics performance"
-                $healthData.OverallScore -= 5
+        try {
+            $hwSch = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name 'HwSchMode' -ErrorAction SilentlyContinue
+            if (-not $hwSch -or $hwSch.HwSchMode -ne 2) {
+                $healthData.HealthWarnings += 'Hardware GPU scheduling is disabled'
+                $healthData.Recommendations += 'Enable hardware GPU scheduling for lower latency'
+                $healthData.HealthScore -= 5
             }
-            # Silent fail for optimization checks
+        }
+        catch {
+            Write-Verbose "Hardware scheduling check failed: $($_.Exception.Message)"
+        }
 
-        # 7. Network Health Check - Win32_NetworkAdapter NetEnabled and NetConnectionStatus analysis
-            $networkAdapters = Get-WmiObject -Class Win32_NetworkAdapter -Filter "NetEnabled=True" -ErrorAction SilentlyContinue
+        try {
+            $networkAdapters = Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'NetEnabled=True' -ErrorAction Stop
             $activeAdapters = $networkAdapters | Where-Object { $_.NetConnectionStatus -eq 2 }
-
+            $healthData.Metrics['ActiveNetworkAdapters'] = $activeAdapters.Count
             if ($activeAdapters.Count -eq 0) {
-                $healthData.Issues += "No active network connections detected"
-                $healthData.Recommendations += "Check network connectivity for online gaming"
-                $healthData.OverallScore -= 20
+                $healthData.Issues += 'No active network connections detected'
+                $healthData.Recommendations += 'Check network connectivity for online features'
+                $healthData.HealthScore -= 20
+            }
+            elseif ($activeAdapters.Count -gt 2) {
+                $healthData.HealthWarnings += 'Multiple active network adapters detected'
+                $healthData.Recommendations += 'Disable unused network adapters to reduce latency'
+                $healthData.HealthScore -= 5
+            }
+        }
+        catch {
+            Write-Verbose "Network health check failed: $($_.Exception.Message)"
+        }
 
-            } elseif ($activeAdapters.Count -gt 2) {
-                $healthData.Warnings += "Multiple active network adapters detected"
-                $healthData.Recommendations += "Disable unused network adapters to reduce latency"
-                $healthData.OverallScore -= 5
-            # Silent fail for network check
+        if ($healthData.HealthScore -lt 0) { $healthData.HealthScore = 0 }
 
-        # Determine overall status - OverallScore ge 90 Excellent, ge 75 Good, ge 60 Fair, Poor, Critical
-        if ($healthData.OverallScore -ge 90) {
-            $healthData.Status = "Excellent"
-        } elseif ($healthData.OverallScore -ge 75) {
-            $healthData.Status = "Good"
-            $healthData.Status = "Fair"
-            $healthData.Status = "Poor"
-            $healthData.Status = "Critical"
+        if ($healthData.HealthScore -ge 90) {
+            $healthData.HealthStatus = 'Excellent'
+        }
+        elseif ($healthData.HealthScore -ge 75) {
+            $healthData.HealthStatus = 'Good'
+        }
+        elseif ($healthData.HealthScore -ge 60) {
+            $healthData.HealthStatus = 'Fair'
+        }
+        elseif ($healthData.HealthScore -ge 40) {
+            $healthData.HealthStatus = 'Poor'
+        }
+        else {
+            $healthData.HealthStatus = 'Critical'
+        }
 
+        $healthData.LastResult = Get-Date
         return $healthData
-
+    }
+    catch {
         Log "Error performing system health check: $($_.Exception.Message)" 'Error'
         return @{
-            OverallScore = 0
-            Issues = @("Health check failed")
-            Warnings = @()
-            Recommendations = @("Run as Administrator for complete health analysis")
-            Status = "Unknown"
-            Metrics = @{}
+            OverallScore   = 0
+            Issues         = @('Health check failed')
+            Warnings       = @()
+            Recommendations = @('Run as Administrator for complete health analysis')
+            Status         = 'Unknown'
+            Metrics        = @{}
         }
+    }
+}
+
 
 function Update-SystemHealthSummary {
+    try {
         $status = if ($global:SystemHealthData.HealthStatus) { $global:SystemHealthData.HealthStatus } else { 'Not Run' }
         $score = $global:SystemHealthData.HealthScore
         $lastRun = $global:SystemHealthData.LastHealthCheck
@@ -2550,13 +2640,14 @@ function Update-SystemHealthSummary {
         if ($status -eq 'Error') {
             $text = 'Error (see log)'
             $foreground = '#FF4444'
-
-        } elseif ($lastRun) {
+        }
+        elseif ($lastRun) {
             $timeStamp = $lastRun.ToString('HH:mm')
             if ($score -ne $null) {
                 $roundedScore = [Math]::Round([double]$score, 0)
                 $text = '{0} ({1}% @ {2})' -f $status, [int]$roundedScore, $timeStamp
-            } else {
+            }
+            else {
                 $text = '{0} (Last: {1})' -f $status, $timeStamp
             }
 
@@ -2568,6 +2659,7 @@ function Update-SystemHealthSummary {
                 'Critical' { $foreground = '#FF6B6B' }
                 default { $foreground = '#A6AACF' }
             }
+        }
 
         if ($lblDashSystemHealth) {
             $lblDashSystemHealth.Dispatcher.Invoke([Action]{
@@ -2575,29 +2667,37 @@ function Update-SystemHealthSummary {
                 Set-BrushPropertySafe -Target $lblDashSystemHealth -Property 'Foreground' -Value $foreground
             })
         }
+    }
+    catch {
         Log "Error updating dashboard health summary: $($_.Exception.Message)" 'Warning'
+    }
+}
+
 
 function Update-SystemHealthDisplay {
     param([switch]$RunCheck)
 
-        $shouldRun = [bool]$RunCheck
-
-        if ($shouldRun) {
+    try {
+        if ($RunCheck) {
             $healthData = Get-SystemHealthStatus
             if ($healthData) {
                 $timestamp = Get-Date
                 $global:SystemHealthData.LastHealthCheck = $timestamp
-                $global:SystemHealthData.HealthStatus = $healthData.Status
-                $global:SystemHealthData.HealthScore = $healthData.OverallScore
-                $global:SystemHealthData.HealthWarnings = $healthData.Warnings
+                $global:SystemHealthData.HealthStatus = $healthData.HealthStatus
+                $global:SystemHealthData.HealthScore = $healthData.HealthScore
+                $global:SystemHealthData.HealthWarnings = $healthData.HealthWarnings
                 $global:SystemHealthData.Recommendations = $healthData.Recommendations
                 $global:SystemHealthData.Issues = $healthData.Issues
                 $global:SystemHealthData.Metrics = $healthData.Metrics
                 $global:SystemHealthData.LastResult = $healthData
-                Log "Health check complete: $($healthData.Status) ($($healthData.OverallScore)% score)" 'Info'
-
+                Log "Health check complete: $($healthData.HealthStatus) ($($healthData.HealthScore)% score)" 'Info'
             }
         }
+
+        Update-SystemHealthSummary
+        return $global:SystemHealthData
+    }
+    catch {
         $errorMessage = 'Error in Update-SystemHealthDisplay: {0}' -f $_.Exception.Message
         Log $errorMessage 'Error'
         $global:SystemHealthData.LastHealthCheck = Get-Date
@@ -2608,11 +2708,10 @@ function Update-SystemHealthDisplay {
         $global:SystemHealthData.Issues = @($errorMessage)
         $global:SystemHealthData.Metrics = @{}
         $global:SystemHealthData.LastResult = $null
+        Update-SystemHealthSummary
+        return $global:SystemHealthData
     }
-
-    Update-SystemHealthSummary
-
-    return $global:SystemHealthData
+}
 
 
 function Show-SystemHealthDialog {
