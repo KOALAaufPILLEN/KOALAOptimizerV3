@@ -1439,6 +1439,10 @@ function Find-AllControlsOfType {
         return
     }
 
+    if ($null -eq $Collection.Value) {
+        $Collection.Value = @()
+    }
+
     $resolvedType = Resolve-ControlType -ControlType $ControlType
     if (-not $resolvedType) {
         return
@@ -1448,53 +1452,42 @@ function Find-AllControlsOfType {
         $Collection.Value += $Parent
     }
 
-    $childCandidates = $null
-    try {
-        $childCandidates = [System.Collections.ArrayList]::new()
-    }
-    catch {
-        $childCandidates = [System.Collections.Generic.List[object]]::new()
+    $childCandidates = [System.Collections.ArrayList]::new()
+
+    $childCollections = @()
+
+    foreach ($collectionProperty in 'Children','Items','Controls','Inlines','RowDefinitions','ColumnDefinitions','Blocks') {
+        $value = $null
+        try { $value = $Parent.$collectionProperty } catch { $value = $null }
+        if ($value) { $childCollections += ,$value }
     }
 
-    try {
-        $children = $Parent.Children
-    }
-    catch {
-        $children = $null
-    }
-
-    if (-not $childCandidates) {
-        $childCandidates = [System.Collections.Generic.List[object]]::new()
-    }
-
-    if ($children) {
-        foreach ($child in $children) {
+    foreach ($collection in $childCollections) {
+        if (-not $collection) { continue }
+        foreach ($child in $collection) {
             if ($child -is [System.Windows.DependencyObject]) {
                 [void]$childCandidates.Add($child)
             }
         }
     }
 
-    if ($Parent.PSObject.Properties['Content']) {
-        $content = $Parent.Content
-        if ($content -is [System.Windows.DependencyObject]) {
-            [void]$childCandidates.Add($content)
-        }
-    }
-
-    if ($Parent.PSObject.Properties['Child']) {
-        $singleChild = $Parent.Child
-        if ($singleChild -is [System.Windows.DependencyObject]) {
-            [void]$childCandidates.Add($singleChild)
+    foreach ($propertyName in 'Content','Child') {
+        if ($Parent.PSObject.Properties[$propertyName]) {
+            $value = $Parent.$propertyName
+            if ($value -is [System.Windows.DependencyObject]) {
+                [void]$childCandidates.Add($value)
+            }
         }
     }
 
     if ($Parent -is [System.Windows.DependencyObject]) {
         $visualCount = 0
         try { $visualCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Parent) } catch { $visualCount = 0 }
-        for ($i = 0; $i -lt $visualCount; $i++) {
+
+        for ($index = 0; $index -lt $visualCount; $index++) {
             $visualChild = $null
-            try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $i) } catch { $visualChild = $null }
+            try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $index) } catch { $visualChild = $null }
+
             if ($visualChild -is [System.Windows.DependencyObject]) {
                 [void]$childCandidates.Add($visualChild)
             }
@@ -1514,7 +1507,9 @@ function Find-AllControlsOfType {
     }
 
     foreach ($childCandidate in $childCandidates) {
-        Find-AllControlsOfType -Parent $childCandidate -ControlType $resolvedType -Collection $Collection
+        if ($null -ne $childCandidate) {
+            Find-AllControlsOfType -Parent $childCandidate -ControlType $resolvedType -Collection $Collection
+        }
     }
 }
 
