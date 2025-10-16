@@ -90,7 +90,7 @@ pwsh ./merger-update.ps1 -SkipDownload
 
 ## 🧪 Tests & Qualitätsmaßnahmen
 
-- ✅ Alle Module werden mit `[Parser]::ParseFile` auf Syntaxfehler geprüft.
+- ✅ Alle Module werden mit `tools/Validate-Scripts.ps1` geprüft (`pwsh ./tools/Validate-Scripts.ps1`).
 - ✅ `gamesTweaks.ps1` & `gui.ps1` sind UTF-8 mit BOM gespeichert – Emojis bleiben stabil.
 - ✅ `helpers.ps1` basiert auf der funktionierenden V2-Codebasis und wurde für V3 übernommen.
 

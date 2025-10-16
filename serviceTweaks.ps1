@@ -38,17 +38,26 @@ function Disable-ServiceSafe {
         return @{ Success = $false; Message = "$DisplayName not found" }
     }
 
+    if ($state.StartType -eq 'Disabled') {
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Log "[$timestamp] $DisplayName already disabled" 'Info'
+        return @{ Success = $true }
+    }
+
     try {
         if ($ForceStop -and $state.Status -eq 'Running') {
             Stop-Service -Name $ServiceName -Force -ErrorAction Stop
-            Log "$DisplayName service stopped" 'Info'
+            $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            Log "[$timestamp] $DisplayName service stopped" 'Info'
         }
 
         Set-Service -Name $ServiceName -StartupType Disabled -ErrorAction Stop
-        Log "$DisplayName service disabled" 'Success'
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Log "[$timestamp] $DisplayName service disabled" 'Success'
         return @{ Success = $true }
     } catch {
-        $message = "Failed to disable ${DisplayName}: $($_.Exception.Message)"
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        $message = "[$timestamp] Failed to disable ${DisplayName}: $($_.Exception.Message)"
         Log $message 'Warning'
         return @{ Success = $false; Message = $message }
     }
@@ -146,10 +155,11 @@ function Apply-ServiceOptimizations {
         }
     }
 
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     if ($serviceErrors.Count -gt 0) {
-        Log "Service optimization completed with $($serviceErrors.Count) issues. Review log for details." 'Warning'
+        Log "[$timestamp] Service optimization completed with $($serviceErrors.Count) issues. Review log for details." 'Warning'
     } else {
-        Log 'Service optimization completed successfully with no errors.' 'Success'
+        Log "[$timestamp] Service optimization completed successfully with no errors." 'Success'
     }
 
     return $appliedCount
