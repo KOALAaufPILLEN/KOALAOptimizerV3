@@ -1453,7 +1453,6 @@ function Find-AllControlsOfType {
     }
 
     $childCandidates = @()
-
     $childCollections = @()
 
     foreach ($collectionProperty in 'Children','Items','Controls','Inlines','RowDefinitions','ColumnDefinitions','Blocks') {
@@ -1483,7 +1482,6 @@ function Find-AllControlsOfType {
     if ($Parent -is [System.Windows.DependencyObject]) {
         $visualCount = 0
         try { $visualCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Parent) } catch { $visualCount = 0 }
-
         for ($index = 0; $index -lt $visualCount; $index++) {
             $visualChild = $null
             try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $index) } catch { $visualChild = $null }
@@ -1492,6 +1490,7 @@ function Find-AllControlsOfType {
                 $childCandidates += $visualChild
             }
         }
+    }
 
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
