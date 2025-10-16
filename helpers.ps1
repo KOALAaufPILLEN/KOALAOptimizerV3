@@ -1452,8 +1452,7 @@ function Find-AllControlsOfType {
         $Collection.Value += $Parent
     }
 
-    $childCandidates = [System.Collections.ArrayList]::new()
-
+    $childCandidates = @()
     $childCollections = @()
 
     foreach ($collectionProperty in 'Children','Items','Controls','Inlines','RowDefinitions','ColumnDefinitions','Blocks') {
@@ -1466,7 +1465,7 @@ function Find-AllControlsOfType {
         if (-not $collection) { continue }
         foreach ($child in $collection) {
             if ($child -is [System.Windows.DependencyObject]) {
-                [void]$childCandidates.Add($child)
+                $childCandidates += $child
             }
         }
     }
@@ -1475,7 +1474,7 @@ function Find-AllControlsOfType {
         if ($Parent.PSObject.Properties[$propertyName]) {
             $value = $Parent.$propertyName
             if ($value -is [System.Windows.DependencyObject]) {
-                [void]$childCandidates.Add($value)
+                $childCandidates += $value
             }
         }
     }
@@ -1483,13 +1482,12 @@ function Find-AllControlsOfType {
     if ($Parent -is [System.Windows.DependencyObject]) {
         $visualCount = 0
         try { $visualCount = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Parent) } catch { $visualCount = 0 }
-
         for ($index = 0; $index -lt $visualCount; $index++) {
             $visualChild = $null
             try { $visualChild = [System.Windows.Media.VisualTreeHelper]::GetChild($Parent, $index) } catch { $visualChild = $null }
 
             if ($visualChild -is [System.Windows.DependencyObject]) {
-                [void]$childCandidates.Add($visualChild)
+                $childCandidates += $visualChild
             }
         }
     }
@@ -1497,7 +1495,7 @@ function Find-AllControlsOfType {
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
                 if ($logicalChild -is [System.Windows.DependencyObject]) {
-                    [void]$childCandidates.Add($logicalChild)
+                    $childCandidates += $logicalChild
                 }
             }
         }
