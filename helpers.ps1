@@ -1492,6 +1492,7 @@ function Find-AllControlsOfType {
                 [void]$childCandidates.Add($visualChild)
             }
         }
+    }
 
         try {
             foreach ($logicalChild in [System.Windows.LogicalTreeHelper]::GetChildren($Parent)) {
