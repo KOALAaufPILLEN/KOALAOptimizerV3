@@ -1448,13 +1448,23 @@ function Find-AllControlsOfType {
         $Collection.Value += $Parent
     }
 
-    $childCandidates = New-Object System.Collections.ArrayList
+    $childCandidates = $null
+    try {
+        $childCandidates = [System.Collections.ArrayList]::new()
+    }
+    catch {
+        $childCandidates = [System.Collections.Generic.List[object]]::new()
+    }
 
     try {
         $children = $Parent.Children
     }
     catch {
         $children = $null
+    }
+
+    if (-not $childCandidates) {
+        $childCandidates = [System.Collections.Generic.List[object]]::new()
     }
 
     if ($children) {
